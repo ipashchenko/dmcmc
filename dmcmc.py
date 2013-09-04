@@ -4,6 +4,7 @@
 import math
 import numpy as np
 from scipy import special
+from astroML.density_estimation.histtools import histogram
 import emcee
 
 
@@ -44,12 +45,10 @@ class LnPost(object):
         # D-term ``d``.
         
         d_distribution = self.model(d)
-        lnlks_detections = [self.lnprob(detection, d_distribution) for
-                            detection in self.detections]
-        lnlks_ulimits = [self.lnprob(ulimit, d_distribution, type='u') for
-                         ulimit in self.ulimits]
-        lnlkss = lnprobs_detections.extend(lnprobs_ulimits)
-        lnlk = lnprobs.sum()
+        lnlks_detections = self.lnprob(detections, d_distribution)
+        lnlks_ulimits = self.lnprob(ulimits, d_distribution, type='u')
+        lnlks = lnprobs_detections.extend(lnprobs_ulimits)
+        lnlk = lnlks.sum()
         
         return lnlk + self.lnpr(d)
         
@@ -74,26 +73,60 @@ class LnPost(object):
 
         return self.data[0] * np.sqrt((result * result.conjugate()).real)
         
-    def lnprob(self, x, distribution, type=None):
+    def lnprob(self, xs, distribution, kind=None):
         """
-        Method that given some value ``x`` and sample from some distribution
-        (container of values) returns natural logarithm of likelihood of
-        ``x`` being generated from given distribution.
+        Method that given some values ``xs`` and sample from some distribution
+        (container of values) returns natural logarithm of likelihood of values
+        ``xs`` being generated from given distribution.
         
         Parameters:
         
-            x - value of interest,
+            xs - values of interest,
             
             distribution - [container] - sample from distribution that is checked,
             
-            type [None, 'u', 'l'] - type of value ``x`` (detection, upper or
-            lower limit).
+            kind [None, 'u', 'l'] - type of values ``xs`` (detections, upper or
+            lower limits).
             
         Output:
         
-        Natural logarithm of likelihood of ``x`` being generated from
+        Natural logarithm of likelihood of ``xs`` being generated from
         sample's distribution.
         """
+        
+        pass
+    
+        try:
+            hist_d, edges_d = histogram(distribution, bins='knuth', normed=True)
+        except IndexError:
+	        hist_d = None
+	        edges_d = None
+
+        if hist_d is not None:
+			# Resize edges by 1 from right
+            lower_d = np.resize(edges_d, len(edges_d) - 1)
+
+		knuth_width = np.diff(lower_d)[0]
+		probs = np.zeros(len(xs))
+				
+		if kind is None:
+			for i in range(len(probs)):
+				probs[i] = hist_d[((lower_d[:, np.newaxis] - xs).T > 0)[i]][0] *\
+						   knuth_width
+	
+		elif kind is 'u':
+			for i in range(len(probs)):
+				probs[i] = knuth_width * hist_d[np.where(((lower_d[:, np.newaxis]\
+								                           - xs).T)[i] < 0)].sum()
+								
+		elif kind is 'l':
+			raise NotImplementedError('Please, implement lower limits!')
+					
+		else:
+			raise Exception('``kind`` parameter must be ``None``, ``u`` or ``l``.')
+	
+		return np.log(probs).sum()
+
         
     def lnpr(self, d):
         """
