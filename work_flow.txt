@@ -1,0 +1,50 @@
+
+import math
+import numpy as np
+from scipy import special
+from astroML.density_estimation.histtools import histogram
+from dmcmc import LnPost, vec_lnlognorm, vec_lngenbeta, vec_lnunif, lnunif
+cd ~/work/emcee/
+import emcee
+from matplotlib.pyplot import bar
+
+
+detections = [0.13, 0.1, 0.06, 0.05, 0.07]  
+ulimits = [0.2, 0.15, 0.23, 0.17]
+    
+# Preparing distributions
+distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
+                      (vec_lngenbeta,[2.0, 3.0, 0.0, 0.1]),
+                      (vec_lnunif,[-math.pi,math.pi]),
+                      (vec_lngenbeta, [3.0, 8.0, 0.0, 0.2]),
+                      (vec_lnunif, [-math.pi,math.pi]),
+                      (vec_lnunif, [-math.pi,math.pi])) 
+distributions = list()
+# Setting up emcee
+nwalkers = 250    
+ndim = 1
+p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
+# ``func`` - callable, ``args`` - list of it's arguments
+for (func, args) in distributions_data:    
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
+                                    bcast=True)
+    pos, prob, state = sampler.run_mcmc(p0, 100)
+    sampler.reset()
+    sampler.run_mcmc(pos, 1000)
+    distributions.append(sampler.flatchain[:,0][::2].copy())
+
+lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif, args=[0., 1.])
+nwalkers = 250
+ndim = 1
+p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
+sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
+pos, prob, state = sampler.run_mcmc(p0, 100)
+sampler.reset()
+
+sampler.run_mcmc(pos, 500)
+d = sampler.flatchain[::2].copy()
+      
+hist_d, edges_d = histogram(d, bins='knuth', normed=True)
+lower_d = np.resize(edges_d, len(edges_d) - 1)
+bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5, label="D")
+
