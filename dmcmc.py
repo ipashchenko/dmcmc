@@ -4,14 +4,14 @@
 import math
 import numpy as np
 from scipy import special
-from astroML.density_estimation.histtools import histogram
+from knuth_hist import histogram
 
 
 # TODO: make data dictionary ``distributions`` with keys: r, M, fi_M, D_2,
 # fi_2, fi_1
 class LnPost(object):
     """
-    Class that represents posterior density of given amplitude of D-.        
+    Class that represents posterior density of given amplitude of D-.
     Using ``detections`` and ``ulimits`` parameters find probability of them
     being generated from cross-to-parallel hands distribution generated
     by distributions of other parameters and given amplitude of the
@@ -32,7 +32,7 @@ class LnPost(object):
                             Distributions of (|r|, |M|, fi_M, |D_2|, fi_2, fi_1),
 
             lnpr - callable prior on amplitude of the D-term.
-            
+
             args - list of the additional arguments for lnpr callable.
         """
 
@@ -73,7 +73,7 @@ class LnPost(object):
 
         Output:
 
-            np.array of N values of cross-hand ratios.    
+            np.array of N values of cross-hand ratios.
         """
 
         data = self.distributions
@@ -105,17 +105,17 @@ class LnPost(object):
         """
 
         try:
-            hist_d, edges_d = histogram(distribution, bins='knuth', normed=True)
+            hist_d, edges_d = histogram(distribution, normed=True)
         except IndexError:
             hist_d = None
             edges_d = None
             result = None
 
-        if hist_d is not None:            
+        if hist_d is not None:
             lower_d = np.resize(edges_d, len(edges_d) - 1)
             knuth_width = np.diff(lower_d)[0]
             probs = np.zeros(len(xs))
-    
+
             if kind is None:
                 for i in range(len(probs)):
                     probs[i] = knuth_width *\
@@ -130,7 +130,7 @@ class LnPost(object):
             else:
                 raise Exception('``kind`` parameter must be ``None``, ``u``\
                                 or ``l``.')
-            
+
             result = np.log(probs).sum()
 
         return result
@@ -152,10 +152,10 @@ def lnunif(x, a, b):
     result = - math.log(b - a)
     if not (a <= x) & (x <= b):
         result = float('-inf')
-         
+
     return result
-     
-     
+
+
 def vec_lnunif(x, a, b):
     """
     Vectorized (natural logarithm of) uniform distribution on [a, b].
@@ -193,7 +193,7 @@ def vec_lngenbeta(x, alpha, beta, c, d):
         np.log(d - x_)
     result = np.where((c < x) & (x < d), result1, float("-inf"))
 
-    return result   
+    return result
 
 
 class _function_wrapper(object):
@@ -220,32 +220,32 @@ class _function_wrapper(object):
 
 if __name__ == '__main__()':
 
-    detections = [0.13, 0.1, 0.06, 0.05, 0.07]  
+    detections = [0.13, 0.1, 0.06, 0.05, 0.07]
     ulimits = [0.2, 0.15, 0.23, 0.17]
-    
+
     # Preparing distributions
     distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
                           (vec_lngenbeta,[2.0, 3.0, 0.0, 0.1]),
                           (vec_lnunif,[-math.pi,math.pi]),
                           (vec_lngenbeta, [3.0, 8.0, 0.0, 0.2]),
                           (vec_lnunif, [-math.pi,math.pi]),
-                          (vec_lnunif, [-math.pi,math.pi])) 
+                          (vec_lnunif, [-math.pi,math.pi]))
     distributions = list()
     # Setting up emcee
-    nwalkers = 250    
+    nwalkers = 250
     ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     # ``func`` - callable, ``args`` - list of it's arguments
-    for (func, args) in distributions_data:    
+    for (func, args) in distributions_data:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
                                         bcast=True)
         pos, prob, state = sampler.run_mcmc(p0, 100)
         sampler.reset()
         sampler.run_mcmc(pos, 1000)
         distributions.append(sampler.flatchain[:,0][::2].copy())
-        
+
     # Sampling posterior density of ``d``
-    
+
     # Prepairing callable posterior density
     lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif, args=[0., 1.])
     nwalkers = 250
@@ -254,12 +254,12 @@ if __name__ == '__main__()':
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
     pos, prob, state = sampler.run_mcmc(p0, 250)
     sampler.reset()
-        
+
     sampler.run_mcmc(pos, 1000)
     d = sampler.flatchain[:,0][::2].copy()
-      
+
     hist_d, edges_d = histogram(d, bins='knuth', normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
     bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5, label="D")
-  
-                                       
+
+
