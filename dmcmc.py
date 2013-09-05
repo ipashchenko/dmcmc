@@ -1,14 +1,16 @@
 #!/usr/bin python
 # -*- coding: utf-8 -*-
 
+import sys
+sys.path.append('/home/ipashchenko/work/emcee')
 import math
+import emcee
 import numpy as np
 from scipy import special
 from knuth_hist import histogram
+from matplotlib.pyplot import bar
 
 
-# TODO: make data dictionary ``distributions`` with keys: r, M, fi_M, D_2,
-# fi_2, fi_1
 class LnPost(object):
     """
     Class that represents posterior density of given amplitude of D-.
@@ -104,34 +106,29 @@ class LnPost(object):
         sample's distribution.
         """
 
-        try:
-            hist_d, edges_d = histogram(distribution, normed=True)
-        except IndexError:
-            hist_d = None
-            edges_d = None
-            result = None
 
-        if hist_d is not None:
-            lower_d = np.resize(edges_d, len(edges_d) - 1)
-            knuth_width = np.diff(lower_d)[0]
-            probs = np.zeros(len(xs))
+        hist_d, edges_d = histogram(distribution, normed=True)
 
-            if kind is None:
-                for i in range(len(probs)):
-                    probs[i] = knuth_width *\
-                        hist_d[((lower_d[:, np.newaxis] - xs).T > 0)[i]][0]
-            elif kind is 'u':
-                for i in range(len(probs)):
-                    probs[i] = knuth_width *\
-                                hist_d[np.where(((lower_d[:, np.newaxis] -\
-                                                  xs).T)[i] < 0)].sum()
-            elif kind is 'l':
-                raise NotImplementedError('Please, implement lower limits!')
-            else:
-                raise Exception('``kind`` parameter must be ``None``, ``u``\
-                                or ``l``.')
+        lower_d = np.resize(edges_d, len(edges_d) - 1)
+        knuth_width = np.diff(lower_d)[0]
+        probs = np.zeros(len(xs))
 
-            result = np.log(probs).sum()
+        if kind is None:
+            for i in range(len(probs)):
+                probs[i] = knuth_width *\
+                           hist_d[((lower_d[:, np.newaxis] - xs).T > 0)[i]][0]
+        elif kind is 'u':
+            for i in range(len(probs)):
+                probs[i] = knuth_width *\
+                            hist_d[np.where(((lower_d[:, np.newaxis] -\
+                                              xs).T)[i] < 0)].sum()
+        elif kind is 'l':
+            raise NotImplementedError('Please, implement lower limits!')
+        else:
+            raise Exception('``kind`` parameter must be ``None``, ``u``\
+                            or ``l``.')
+
+        result = np.log(probs).sum()
 
         return result
 
@@ -196,28 +193,6 @@ def vec_lngenbeta(x, alpha, beta, c, d):
     return result
 
 
-class _function_wrapper(object):
-    """
-    This is a hack to make the function pickleable when ``args`` are also included.
-    """
-    def __init__(self, f, args):
-        self.f = f
-        self.args = args
-
-    def __call__(self, x):
-        try:
-            return self.f(x, *self.args)
-        except:
-            import traceback
-            print("Exception while calling your prior function:")
-            print("  params:", x)
-            print("  args:", self.args)
-            print("  exception:")
-            traceback.print_exc()
-            raise
-
-
-
 if __name__ == '__main__()':
 
     detections = [0.13, 0.1, 0.06, 0.05, 0.07]
@@ -232,7 +207,7 @@ if __name__ == '__main__()':
                           (vec_lnunif, [-math.pi,math.pi]))
     distributions = list()
     # Setting up emcee
-    nwalkers = 250
+    nwalkers = 50
     ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     # ``func`` - callable, ``args`` - list of it's arguments
@@ -248,14 +223,14 @@ if __name__ == '__main__()':
 
     # Prepairing callable posterior density
     lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif, args=[0., 1.])
-    nwalkers = 250
+    nwalkers = 50
     ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
-    pos, prob, state = sampler.run_mcmc(p0, 250)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost, threads=4)
+    pos, prob, state = sampler.run_mcmc(p0, 25)
     sampler.reset()
 
-    sampler.run_mcmc(pos, 1000)
+    sampler.run_mcmc(pos, 100)
     d = sampler.flatchain[:,0][::2].copy()
 
     hist_d, edges_d = histogram(d, bins='knuth', normed=True)
