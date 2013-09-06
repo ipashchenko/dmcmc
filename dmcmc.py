@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
-sys.path.append('/home/ipashchenko/work/emcee')
+sys.path.append('/home/ilya/work/emcee')
 import math
 import emcee
 import numpy as np
@@ -195,8 +195,14 @@ def vec_lngenbeta(x, alpha, beta, c, d):
 
 if __name__ == '__main__()':
 
-    detections = [0.13, 0.1, 0.06, 0.05, 0.07]
-    ulimits = [0.2, 0.15, 0.23, 0.17]
+    # C band D_L
+    #detections = [0.143, 0.231, 0.077, 0.09, 0.152, 0.115, 0.1432, 0.1696, 0.1528,
+    #              0.126, 0.1126, 0.138, 0.194, 0.109, ]
+    #ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876]
+    
+    # L band D_R
+    detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
+    ulimits = [0.0838, 0.075]
 
     # Preparing distributions
     distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
@@ -207,7 +213,7 @@ if __name__ == '__main__()':
                           (vec_lnunif, [-math.pi,math.pi]))
     distributions = list()
     # Setting up emcee
-    nwalkers = 50
+    nwalkers = 200
     ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     # ``func`` - callable, ``args`` - list of it's arguments
@@ -223,14 +229,14 @@ if __name__ == '__main__()':
 
     # Prepairing callable posterior density
     lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif, args=[0., 1.])
-    nwalkers = 50
+    nwalkers = 100
     ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost, threads=4)
-    pos, prob, state = sampler.run_mcmc(p0, 25)
+    pos, prob, state = sampler.run_mcmc(p0, 50)
     sampler.reset()
 
-    sampler.run_mcmc(pos, 100)
+    sampler.run_mcmc(pos, 200)
     d = sampler.flatchain[:,0][::2].copy()
 
     hist_d, edges_d = histogram(d, bins='knuth', normed=True)
