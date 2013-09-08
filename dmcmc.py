@@ -8,7 +8,7 @@ import emcee
 import numpy as np
 from scipy import special
 from knuth_hist import histogram
-from matplotlib.pyplot import bar
+from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
 
 
 class LnPost(object):
@@ -249,43 +249,6 @@ class LnLike(object):
         return result
     
     
-class GaussProposal(object):
-    
-    def __init__(self, cov, nwalkers=1):
-        
-        self.nwalkers = int(nwalkers)
-        
-        self.cov = cov
-        
-        try:
-            self.ndim = shape(cov)[0]
-        except IndexError:
-            self.ndim = 1
-
-    def __call__(self, p):
-        """
-        p - list of positions of ``nwalker`` walkers.
-        """
-        
-        nwalkers, ndim = p.shape
-        
-        assert(shape(p)[0] == self.nwalkers)
-    
-        if self.ndim == 1:
-            if self.nwalkers == 1:
-                result = [np.random.normal(loc=p, scale=self.cov)]
-            else:
-                result = [np.random.normal(loc=p_i, scale=self.cov) for p_i in p]
-        else:
-            if self.nwalkers == 1:
-                result = [np.random.multivariate_normal(mean=p, cov=self.cov)]
-            else:
-                result = [np.random.multivariate_normal(mean=p_i, cov=self.cov) for
-                          p_i in p]
-                
-        return result
-    
-    
 def lnunif(x, a, b):
     """
     (Natural logarithm of) uniform distribution on [a, b].
@@ -338,7 +301,10 @@ def vec_lngenbeta(x, alpha, beta, c, d):
     return result
 
 
-def logl(x):
+def logp(x):
+    """
+    logPrior used in PT.
+    """
     
     return lnunif(x, 0., 1.)
 
@@ -351,8 +317,8 @@ if __name__ == '__main__()':
     ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876]
     
     # L band D_R
-    detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
-    ulimits = [0.0838, 0.075]
+    #detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
+    #ulimits = [0.0838, 0.075]
 
     # Preparing distributions
     distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
@@ -365,7 +331,7 @@ if __name__ == '__main__()':
     # Setting up emcee
     nwalkers = 200
     ndim = 1 
-    p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
+    p0 = np.random.uniform(low=0., high=1.0, size=(nwalkers, ndim))
     for (func, args) in distributions_data:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
                                         bcast=True)
@@ -400,11 +366,12 @@ if __name__ == '__main__()':
     ntemps = 20
     nwalkers = 100
     ndim = 1
-    logl = logl
-    logp = LnPost(detections, ulimits, distributions, lnpr=lnunif,\
-                    args=[0., 1.])
+    # logLikelihood
+    logl = LnLike(detections, ulimits, distributions) 
+    # logprior
+    logp = logp
     # Initializing sampler
-    sampler = emcee.PTSampler(ntemps, nwalkers, ndim, logl, logp, threads=4)
+    sampler = emcee.PTSampler(ntemps, nwalkers, ndim, logl, logp, threads=12)
     # Generating starting values
     p0 = np.random.uniform(low=0.05, high=0.2, size=(ntemps, nwalkers, ndim))
     # Burn-in
@@ -427,6 +394,22 @@ if __name__ == '__main__()':
     # Longest autocorrelation length (over any temperature)
     max_acl = np.max(sampler.acor)
     
+    # shortcut for zero-temperature chain
+    d = sample.chain[0].T.reshape(20000)
+    hist_d, edges_d = histogram(d, normed=True)
+    lower_d = np.resize(edges_d, len(edges_d) - 1)
+    bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
+    font = {'family': 'Droid Sans', 'weight': 'normal', 'size': 18}
+    xlabel(ur"$C$-диапазон $D_{L}$")
+    ylabel(ur"плотность вероятности")
+    #text(0.06, 50, r'$\mu$  = $0.143$, 95$\%$ интервал: [0.011, 0.174]', fontdict={'family':
+    #                                                            'Droid Sans',\
+    #                                                            'weight': 'normal',\
+    #                                                            'size': 18})
+    axvline(x=0.143, linewidth=2, color='r')
+    axvline(x=0.011, color='r')
+    axvline(x=0.174, color='r')
+
     
     # Using MH MCMC
     p0 = [0.5]
