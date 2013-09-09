@@ -325,6 +325,17 @@ def logp(x):
     return lnunif(x, 0., 1.)
 
 
+def percent(xs, perc=None):
+    """
+    Find ``perc`` % in sorted container xs.
+    """
+    
+    xs_ = sorted(xs)
+    indx = int(math.ceil(len(xs) * perc / 100.))
+    
+    return xs[indx]
+
+
 if __name__ == '__main__()':
 
     # C band D_L
@@ -354,7 +365,8 @@ if __name__ == '__main__()':
         pos, prob, state = sampler.run_mcmc(p0, 100)
         sampler.reset()
         sampler.run_mcmc(pos, 1000)
-        distributions.append(sampler.flatchain[:,0][::2].copy())
+        # Using only 10000 points for specifying distributions
+        distributions.append(sampler.flatchain[:,0][::20].copy())
 
     # Sampling posterior density of ``d``
 
@@ -375,7 +387,7 @@ if __name__ == '__main__()':
 
     hist_d, edges_d = histogram(d, normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
-    bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5, label="D")
+    bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
 
     
     # Using PT
@@ -411,7 +423,7 @@ if __name__ == '__main__()':
     max_acl = np.max(sampler.acor)
     
     # shortcut for zero-temperature chain
-    d = sampler.chain[0].T.reshape(20000)
+    d = sampler.chain[0,:,::10].T.reshape(2000)
     hist_d, edges_d = histogram(d, normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
     bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
@@ -426,6 +438,41 @@ if __name__ == '__main__()':
     axvline(x=0.115, color='r')
     axvline(x=0.172, color='r')
 
+    # Predictive density analysis
+    predictive_ratios = logl.model_vectorized(d)
+    # dim = (len(d), len(distributions[i]))
+    simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
+                      in predictive_ratios]
+    # Lists of some statistics
+    simulated_means = map(mean, simulated_datas)
+    simulated_maxs = map(max, simulated_datas)
+    simulated_mins = map(min, simulated_datas)
+    
+    # Histograms of statistics for simalated data
+    hist_means, edges_means = histogram(simulated_means, normed=True)
+    lower_means = np.resize(edges_means, len(edges_means) - 1)
+    bar(lower_means, hist_means, width=np.diff(lower_means)[0], color='g', alpha=0.5)
+    
+    hist_maxs, edges_maxs = histogram(simulated_maxs, normed=True)
+    lower_maxs = np.resize(edges_maxs, len(edges_maxs) - 1)
+    bar(lower_maxs, hist_maxs, width=np.diff(lower_maxs)[0], color='r', alpha=0.5)
+    
+    hist_mins, edges_mins = histogram(simulated_mins, normed=True)
+    lower_mins = np.resize(edges_mins, len(edges_mins) - 1)
+    bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], color='b', alpha=0.5)
+    
+    # Draw realized data's statistic
+    axvline(x=mean(detections), linewidth=2, color='g')
+    axvline(x=min(detections), linewidth=2, color='b')
+    axvline(x=max(detections), linewidth=2, color='r')
+    
+    # Draw 5% & 95% borders 
+    axvline(x=procent(simulated_means, proc=5.0), color='g')
+    axvline(x=procent(simulated_means, proc=95.0), color='g')
+    axvline(x=procent(simulated_maxs, proc=5.0), color='r')
+    axvline(x=procent(simulated_maxs, proc=95.0), color='r')
+    axvline(x=procent(simulated_mins, proc=5.0), color='b')
+    axvline(x=procent(simulated_mins, proc=95.0), color='b')
     
     # Using MH MCMC
     p0 = [0.5]
