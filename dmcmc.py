@@ -201,6 +201,22 @@ class LnLike(object):
                  + d * np.exp(1j * data[5])
 
         return data[0] * np.sqrt((result * result.conjugate()).real)
+    
+    def model_vectorized(self, d):
+        """
+        Method that given amplitudes of the D-term returns distributions of
+        cross-to-parallel hands ratios.
+
+        Parameters:
+
+            d - N amplitudes of the D-term,
+
+        Output:
+
+            np.array of (N, len(self.distributions[i]) values of cross-hand ratios.
+        """
+
+        return self.model(d[:, np.newaxis])
 
     def lnprob(self, xs, distribution, kind=None):
         """
@@ -331,7 +347,7 @@ if __name__ == '__main__()':
     # Setting up emcee
     nwalkers = 200
     ndim = 1 
-    p0 = np.random.uniform(low=0., high=1.0, size=(nwalkers, ndim))
+    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     for (func, args) in distributions_data:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
                                         bcast=True)
@@ -395,7 +411,7 @@ if __name__ == '__main__()':
     max_acl = np.max(sampler.acor)
     
     # shortcut for zero-temperature chain
-    d = sample.chain[0].T.reshape(20000)
+    d = sampler.chain[0].T.reshape(20000)
     hist_d, edges_d = histogram(d, normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
     bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
@@ -406,9 +422,9 @@ if __name__ == '__main__()':
     #                                                            'Droid Sans',\
     #                                                            'weight': 'normal',\
     #                                                            'size': 18})
-    axvline(x=0.143, linewidth=2, color='r')
-    axvline(x=0.011, color='r')
-    axvline(x=0.174, color='r')
+    axvline(x=0.147, linewidth=2, color='r')
+    axvline(x=0.115, color='r')
+    axvline(x=0.172, color='r')
 
     
     # Using MH MCMC
