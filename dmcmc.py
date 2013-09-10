@@ -16,8 +16,8 @@ class LnPost(object):
     Class that represents posterior density of given amplitude of D-.
     Using ``detections`` and ``ulimits`` parameters find probability of them
     being generated from cross-to-parallel hands distribution generated
-    by distributions of other parameters and given amplitude of the
-    D-term ``d``.
+    by distributions of other model parameters ``distributions`` and given
+    amplitude of the D-term ``d``.
 
     """
 
@@ -139,12 +139,12 @@ class LnPost(object):
 
         return self._lnpr(d, *self._args)
 
-    
+
 class LnLike(object):
     """
     Class used for MLE estimates.
     """
-    
+
     def __init__(self, detections, ulimits, distributions):
         """
         Parameters:
@@ -175,7 +175,7 @@ class LnLike(object):
         print "Ln of prob. for detections is : " + str(lnlks_detections)
         lnlks_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
         print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
-        
+
         lnlks = lnlks_detections + lnlks_ulimits
         lnlk = lnlks.sum()
 
@@ -201,7 +201,7 @@ class LnLike(object):
                  + d * np.exp(1j * data[5])
 
         return data[0] * np.sqrt((result * result.conjugate()).real)
-    
+
     def model_vectorized(self, d):
         """
         Method that given amplitudes of the D-term returns distributions of
@@ -263,8 +263,8 @@ class LnLike(object):
         result = np.log(probs).sum()
 
         return result
-    
-    
+
+
 def lnunif(x, a, b):
     """
     (Natural logarithm of) uniform distribution on [a, b].
@@ -321,7 +321,7 @@ def logp(x):
     """
     logPrior used in PT.
     """
-    
+
     return lnunif(x, 0., 1.)
 
 
@@ -329,11 +329,11 @@ def percent(xs, perc=None):
     """
     Find ``perc`` % in sorted container xs.
     """
-    
+
     xs_ = sorted(xs)
     indx = int(math.ceil(len(xs) * perc / 100.))
-    
-    return xs[indx]
+
+    return xs_[indx]
 
 
 if __name__ == '__main__()':
@@ -342,7 +342,7 @@ if __name__ == '__main__()':
     detections = [0.143, 0.231, 0.077, 0.09, 0.152, 0.115, 0.1432, 0.1696, 0.1528,
                   0.126, 0.1126, 0.138, 0.194, 0.109, ]
     ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876]
-    
+
     # L band D_R
     #detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
     #ulimits = [0.0838, 0.075]
@@ -357,7 +357,7 @@ if __name__ == '__main__()':
     distributions = list()
     # Setting up emcee
     nwalkers = 200
-    ndim = 1 
+    ndim = 1
     p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
     for (func, args) in distributions_data:
         sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
@@ -373,7 +373,7 @@ if __name__ == '__main__()':
     # Prepairing callable posterior density
     lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif,\
                     args=[0., 1.])
-    
+
     # Using affine-invariant MCMC
     nwalkers = 400
     ndim = 1
@@ -389,13 +389,13 @@ if __name__ == '__main__()':
     lower_d = np.resize(edges_d, len(edges_d) - 1)
     bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
 
-    
+
     # Using PT
     ntemps = 20
     nwalkers = 100
     ndim = 1
     # logLikelihood
-    logl = LnLike(detections, ulimits, distributions) 
+    logl = LnLike(detections, ulimits, distributions)
     # logprior
     logp = logp
     # Initializing sampler
@@ -405,9 +405,9 @@ if __name__ == '__main__()':
     # Burn-in
     for p, lnprob, lnlike in sampler.sample(p0, iterations=25):
         pass
-    
+
     sampler.reset()
-    
+
     for p, lnprob, lnlike in sampler.sample(p, lnprob0=lnprob,
                                            lnlike0=lnlike,
                                            iterations=200):
@@ -421,7 +421,7 @@ if __name__ == '__main__()':
 
     # Longest autocorrelation length (over any temperature)
     max_acl = np.max(sampler.acor)
-    
+
     # shortcut for zero-temperature chain
     d = sampler.chain[0,:,::10].T.reshape(2000)
     hist_d, edges_d = histogram(d, normed=True)
@@ -444,36 +444,36 @@ if __name__ == '__main__()':
     simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
                       in predictive_ratios]
     # Lists of some statistics
-    simulated_means = map(mean, simulated_datas)
-    simulated_maxs = map(max, simulated_datas)
-    simulated_mins = map(min, simulated_datas)
-    
+    simulated_means = map(np.mean, simulated_datas)
+    simulated_maxs = map(np.max, simulated_datas)
+    simulated_mins = map(np.min, simulated_datas)
+
     # Histograms of statistics for simalated data
     hist_means, edges_means = histogram(simulated_means, normed=True)
     lower_means = np.resize(edges_means, len(edges_means) - 1)
     bar(lower_means, hist_means, width=np.diff(lower_means)[0], color='g', alpha=0.5)
-    
+
     hist_maxs, edges_maxs = histogram(simulated_maxs, normed=True)
     lower_maxs = np.resize(edges_maxs, len(edges_maxs) - 1)
     bar(lower_maxs, hist_maxs, width=np.diff(lower_maxs)[0], color='r', alpha=0.5)
-    
+
     hist_mins, edges_mins = histogram(simulated_mins, normed=True)
     lower_mins = np.resize(edges_mins, len(edges_mins) - 1)
     bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], color='b', alpha=0.5)
-    
+
     # Draw realized data's statistic
-    axvline(x=mean(detections), linewidth=2, color='g')
-    axvline(x=min(detections), linewidth=2, color='b')
-    axvline(x=max(detections), linewidth=2, color='r')
-    
-    # Draw 5% & 95% borders 
-    axvline(x=procent(simulated_means, proc=5.0), color='g')
-    axvline(x=procent(simulated_means, proc=95.0), color='g')
-    axvline(x=procent(simulated_maxs, proc=5.0), color='r')
-    axvline(x=procent(simulated_maxs, proc=95.0), color='r')
-    axvline(x=procent(simulated_mins, proc=5.0), color='b')
-    axvline(x=procent(simulated_mins, proc=95.0), color='b')
-    
+    axvline(x=np.mean(detections), linewidth=2, color='g')
+    axvline(x=np.min(detections), linewidth=2, color='b')
+    axvline(x=np.max(detections), linewidth=2, color='r')
+
+    # Draw 5% & 95% borders
+    axvline(x=percent(simulated_means, proc=5.0), color='g')
+    axvline(x=percent(simulated_means, proc=95.0), color='g')
+    axvline(x=percent(simulated_maxs, proc=5.0), color='r')
+    axvline(x=percent(simulated_maxs, proc=95.0), color='r')
+    axvline(x=percent(simulated_mins, proc=5.0), color='b')
+    axvline(x=percent(simulated_mins, proc=95.0), color='b')
+
     # Using MH MCMC
     p0 = [0.5]
     sampler_mh = emcee.MHSampler(cov=[[0.05]], dim=1, lnprobfn=lnpost)
