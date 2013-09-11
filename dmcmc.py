@@ -9,6 +9,7 @@ import numpy as np
 from scipy import special
 from knuth_hist import histogram
 from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
+from scipy.stats.kde import gaussian_kde
 
 
 class LnPost(object):
@@ -21,131 +22,27 @@ class LnPost(object):
 
     """
 
-    def __init__(self, detections, ulimits, distributions, lnpr=None, args=None):
-        """
-        Parameters:
-
-            detections - values of cross-to-parallel hands ratios for the
-                         detected cross-hands,
-
-            ulimits - upper limits on cross-to-parallel hands ratios
-
-            distributions - np.array (5, N) or list of 5 arrays (N,).
-                            Distributions of (|r|, |M|, fi_M, |D_2|, fi_2, fi_1),
-
-            lnpr - callable prior on amplitude of the D-term.
-
-            args - list of the additional arguments for lnpr callable.
-        """
-
-        self.detections = detections
-        self.ulimits = ulimits
-        self.distributions = distributions
+    def __init__(self, detections, ulimits, distributions, size=None, lnpr=None, args=None):
         self._lnpr = lnpr
-        self._args = args
-
-    def __call__(self, d):
-        """
-        Returns posterior probability of d.
-        """
-
-        ratio_distribution = self.model(d)
-        print "Done modeling ratio distibution!"
-        lnlks_detections = self.lnprob(self.detections, ratio_distribution)
-        print "Ln of prob. for detections is : " + str(lnlks_detections)
-        lnlks_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
-        print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
-        try:
-            lnlks = lnlks_detections + lnlks_ulimits
-            lnlk = lnlks.sum()
-            result = lnlk + self.lnpr(d)
-        except TypeError:
-            result = None
-
-        return result
-
-    def model(self, d):
-        """
-        Method that given amplitude of the D-term returns distribution of
-        cross-to-parallel hands ratios.
-
-        Parameters:
-
-            d - amplitude of the D-term,
-
-        Output:
-
-            np.array of N values of cross-hand ratios.
-        """
-
-        data = self.distributions
-
-        result = data[1] * np.exp(1j * data[2]) + data[3] * np.exp(1j * data[4])\
-                 + d * np.exp(1j * data[5])
-
-        return data[0] * np.sqrt((result * result.conjugate()).real)
-
-    def lnprob(self, xs, distribution, kind=None):
-        """
-        Method that given some values ``xs`` and sample from some distribution
-        (container of values) returns natural logarithm of likelihood of values
-        ``xs`` being generated from given distribution.
-
-        Parameters:
-
-            xs - values of interest,
-
-            distribution - [container] - sample from distribution that is checked,
-
-            kind [None, 'u', 'l'] - type of values ``xs`` (detections, upper or
-            lower limits).
-
-        Output:
-
-        Natural logarithm of likelihood of ``xs`` being generated from
-        sample's distribution.
-        """
-
-
-        hist_d, edges_d = histogram(distribution, normed=True)
-
-        lower_d = np.resize(edges_d, len(edges_d) - 1)
-        knuth_width = np.diff(lower_d)[0]
-        probs = np.zeros(len(xs))
-
-        if kind is None:
-            for i in range(len(probs)):
-                probs[i] = knuth_width *\
-                           hist_d[((lower_d[:, np.newaxis] - xs).T > 0)[i]][0]
-        elif kind is 'u':
-            for i in range(len(probs)):
-                probs[i] = knuth_width *\
-                            hist_d[np.where(((lower_d[:, np.newaxis] -\
-                                              xs).T)[i] < 0)].sum()
-        elif kind is 'l':
-            raise NotImplementedError('Please, implement lower limits!')
-        else:
-            raise Exception('``kind`` parameter must be ``None``, ``u``\
-                            or ``l``.')
-
-        result = np.log(probs).sum()
-
-        return result
-
+        self.args = args
+        self._lnlike = LnLike(detections, ulimits, distributions, size=size)
+        
     def lnpr(self, d):
-        """
-        Prior on D-term amplitude.
-        """
-
-        return self._lnpr(d, *self._args)
+        return self._lnpr(d, *self.args)
+    
+    def lnlike(self, d):
+        return self._lnlike.__call__(d)
+        
+    def __call__(self, d):
+        return self.lnlike(d) + self.lnpr(d)
 
 
 class LnLike(object):
     """
-    Class used for MLE estimates.
+    Class representing Likelihood function.
     """
 
-    def __init__(self, detections, ulimits, distributions):
+    def __init__(self, detections, ulimits, distributions, size=None):
         """
         Parameters:
 
@@ -154,13 +51,27 @@ class LnLike(object):
 
             ulimits - upper limits on cross-to-parallel hands ratios
 
-            distributions - np.array (5, N) or list of 5 arrays (N,).
-                            Distributions of (|r|, |M|, fi_M, |D_2|, fi_2, fi_1).
+            distributions - distributions of (|r|, |M|, fi_M, |D_2|, fi_2, fi_1).
+                            or list of (callable, args, kwargs,)
+            size - size of model distributions that will be used for estimating pdf
+                    of cross-to-parallel hands ratios for given RA D-term. If it is
+                    None then distributions is treated like several data samples
+                    sampled from each distribution. If it is set then distribution
+                    is treated like list of tuples with callables and arguments.
         """
 
         self.detections = detections
         self.ulimits = ulimits
-        self.distributions = distributions
+        self.size=size
+        self.distributions = list()
+        
+        # Size of model distributions must be specified
+        assert(self.size)
+        
+        for entry in distributions:
+            entry[2].update({'size': self.size})
+            self.distributions.append(_distribution_wrapper(entry[0],
+                                                            entry[1], entry[2]))
 
     def __call__(self, d):
         """
@@ -197,10 +108,10 @@ class LnLike(object):
 
         data = self.distributions
 
-        result = data[1] * np.exp(1j * data[2]) + data[3] * np.exp(1j * data[4])\
-                 + d * np.exp(1j * data[5])
+        result = data[1]() * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *
+                                                                         data[4]()) + d * np.exp(1j * data[5]())
 
-        return data[0] * np.sqrt((result * result.conjugate()).real)
+        return data[0]() * np.sqrt((result * result.conjugate()).real)
 
     def model_vectorized(self, d):
         """
@@ -239,21 +150,15 @@ class LnLike(object):
         sample's distribution.
         """
 
-        hist_d, edges_d = histogram(distribution, normed=True)
-
-        lower_d = np.resize(edges_d, len(edges_d) - 1)
-        knuth_width = np.diff(lower_d)[0]
+        kde = gaussian_kde(distribution)
         probs = np.zeros(len(xs))
 
         if kind is None:
             for i in range(len(probs)):
-                probs[i] = knuth_width *\
-                           hist_d[((lower_d[:, np.newaxis] - xs).T > 0)[i]][0]
+                probs[i] = kde(xs).sum()
         elif kind is 'u':
             for i in range(len(probs)):
-                probs[i] = knuth_width *\
-                            hist_d[np.where(((lower_d[:, np.newaxis] -\
-                                              xs).T)[i] < 0)].sum()
+                probs[i] = kde.integrate_box_1d(min(distribution), xs[i])
         elif kind is 'l':
             raise NotImplementedError('Please, implement lower limits!')
         else:
@@ -264,6 +169,30 @@ class LnLike(object):
 
         return result
 
+
+class _distribution_wrapper(object):
+    """
+    This is a hack to make the distribution function pickleable when ``args``
+    and ``kwargs`` are also included.
+    """
+    
+    def __init__(self, f, args, kwargs):
+        self.f = f
+        self.args = args
+        self.kwargs = kwargs
+
+    def __call__(self):
+            try:
+                return self.f(*self.args, **self.kwargs)
+            except:
+                import traceback
+                print("dmcmc: Exception while calling your distribution callable:")
+                print("  args:", self.args)
+                print("  kwargs:", self.kwargs)
+                print("  exception:")
+                traceback.print_exc()
+                raise
+            
 
 def lnunif(x, a, b):
     """
@@ -336,53 +265,45 @@ def percent(xs, perc=None):
     return xs_[indx]
 
 
+def genbeta(a, b, *args, **kwargs):
+    return (b - a) * np.random.beta(*args, **kwargs) + a
+
+
 if __name__ == '__main__()':
 
     # C band D_L
     detections = [0.143, 0.231, 0.077, 0.09, 0.152, 0.115, 0.1432, 0.1696, 0.1528,
-                  0.126, 0.1126, 0.138, 0.194, 0.109, ]
-    ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876]
+                  0.126, 0.1126, 0.138, 0.194, 0.109, 0.101]
+    ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876, 0.123, 0.77,
+               0.057, 0.155]
 
     # L band D_R
-    #detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
+    #detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208
+    #              ,0.326]
     #ulimits = [0.0838, 0.075]
 
     # Preparing distributions
-    distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
-                          (vec_lngenbeta,[2.0, 3.0, 0.0, 0.1]),
-                          (vec_lnunif,[-math.pi,math.pi]),
-                          (vec_lngenbeta, [3.0, 8.0, 0.0, 0.2]),
-                          (vec_lnunif, [-math.pi,math.pi]),
-                          (vec_lnunif, [-math.pi,math.pi]))
-    distributions = list()
-    # Setting up emcee
-    nwalkers = 200
-    ndim = 1
-    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
-    for (func, args) in distributions_data:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
-                                        bcast=True)
-        pos, prob, state = sampler.run_mcmc(p0, 100)
-        sampler.reset()
-        sampler.run_mcmc(pos, 1000)
-        # Using only 10000 points for specifying distributions
-        distributions.append(sampler.flatchain[:,0][::20].copy())
-
+    distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
+                      (genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (genbeta, [0.0, 0.2, 3.0, 8.0], dict(),),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
+    
     # Sampling posterior density of ``d``
 
-    # Prepairing callable posterior density
-    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif,\
+    lnpost = LnPost(detections, ulimits, distributions, size=1000, lnpr=lnunif,\
                     args=[0., 1.])
 
     # Using affine-invariant MCMC
-    nwalkers = 400
+    nwalkers = 250
     ndim = 1
     p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost, threads=4)
-    pos, prob, state = sampler.run_mcmc(p0, 50)
+    pos, prob, state = sampler.run_mcmc(p0, 100)
     sampler.reset()
 
-    sampler.run_mcmc(pos, 200)
+    sampler.run_mcmc(pos, 400)
     d = sampler.flatchain[:,0][::2].copy()
 
     hist_d, edges_d = histogram(d, normed=True)
@@ -395,11 +316,11 @@ if __name__ == '__main__()':
     nwalkers = 100
     ndim = 1
     # logLikelihood
-    logl = LnLike(detections, ulimits, distributions)
+    logl = LnLike(detections, ulimits, distributions, size=10000)
     # logprior
     logp = logp
     # Initializing sampler
-    sampler = emcee.PTSampler(ntemps, nwalkers, ndim, logl, logp, threads=12)
+    sampler = emcee.PTSampler(ntemps, nwalkers, ndim, logl, logp)
     # Generating starting values
     p0 = np.random.uniform(low=0.05, high=0.2, size=(ntemps, nwalkers, ndim))
     # Burn-in
@@ -467,12 +388,12 @@ if __name__ == '__main__()':
     axvline(x=np.max(detections), linewidth=2, color='r')
 
     # Draw 5% & 95% borders
-    axvline(x=percent(simulated_means, proc=5.0), color='g')
-    axvline(x=percent(simulated_means, proc=95.0), color='g')
-    axvline(x=percent(simulated_maxs, proc=5.0), color='r')
-    axvline(x=percent(simulated_maxs, proc=95.0), color='r')
-    axvline(x=percent(simulated_mins, proc=5.0), color='b')
-    axvline(x=percent(simulated_mins, proc=95.0), color='b')
+    axvline(x=percent(simulated_means, perc=5.0), color='g')
+    axvline(x=percent(simulated_means, perc=95.0), color='g')
+    axvline(x=percent(simulated_maxs, perc=5.0), color='r')
+    axvline(x=percent(simulated_maxs, perc=95.0), color='r')
+    axvline(x=percent(simulated_mins, perc=5.0), color='b')
+    axvline(x=percent(simulated_mins, perc=95.0), color='b')
 
     # Using MH MCMC
     p0 = [0.5]
