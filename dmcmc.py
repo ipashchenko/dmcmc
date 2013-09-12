@@ -82,15 +82,15 @@ class LnLike(object):
         """
 
         ratio_distribution = self.model(d)
-        print "Ratio distribution for this d is : " + str(ratio_distribution)
-        print "Done modeling ratio distibution!"
         lnlks_detections = self.lnprob(self.detections, ratio_distribution)
-        print "Ln of prob. for detections is : " + str(lnlks_detections)
+        #print "Ln of prob. for detections is : " + str(lnlks_detections)
         lnlks_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
-        print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
+        #print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
 
         lnlks = lnlks_detections + lnlks_ulimits
         lnlk = lnlks.sum()
+        
+        print "LnLikelihood is: " + str(lnlk)
 
         return lnlk
 
@@ -110,8 +110,12 @@ class LnLike(object):
 
         data = self.distributions
 
-        result = data[1]()[0,:] * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *
-                                                                         data[4]()) + d * np.exp(1j * data[5]())
+        try:
+            result = data[1]()[0,:] * np.exp(1j * data[2]()) + data[3]() *\
+                     np.exp(1j * data[4]()) + d * np.exp(1j * data[5]())
+        except IndexError:
+            result = data[1]() * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *\
+                     data[4]()) + d * np.exp(1j * data[5]())
 
         return data[0]() * np.sqrt((result * result.conjugate()).real)
 
@@ -286,10 +290,26 @@ def prepare_sample_m(data):
 
     result = list()
     for entry in data:
-        subsample = np.random.choice(entry[1], size=entry[0])
+        try:
+            subsample = np.random.choice(entry[1], size=entry[0])
+        except AttributeError:
+            subsample = choice(entry[1], size=entry[0])
+            
         result.extend(subsample)
         
     return result
+
+
+def choice(data, size=1):
+    
+    data = np.asarray(data)
+    assert(data.ndim == 1)
+    len_ = len(data) - 1
+    
+    indxs = np.random.random_integers(0, high=len_, size=size)
+    
+    return data[indxs]
+    
     
 
 if __name__ == '__main__()':
@@ -330,8 +350,8 @@ if __name__ == '__main__()':
 
     # Preparing distributions
     distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
-                      (kde.resample, list(), dict()),
-                      #(genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
+                      #(kde.resample, list(), dict()),
+                      (genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
                       (genbeta, [0.0, 0.2, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
@@ -347,10 +367,10 @@ if __name__ == '__main__()':
     ndim = 1
     p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
-    pos, prob, state = sampler.run_mcmc(p0, 50)
+    pos, prob, state = sampler.run_mcmc(p0, 25)
     sampler.reset()
 
-    sampler.run_mcmc(pos, 400)
+    sampler.run_mcmc(pos, 200)
     d = sampler.flatchain[:,0][::10].copy()
 
     hist_d, edges_d = histogram(d, normed=True)
