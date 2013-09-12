@@ -268,6 +268,27 @@ def percent(xs, perc=None):
 def genbeta(a, b, *args, **kwargs):
     return (b - a) * np.random.beta(*args, **kwargs) + a
 
+def prepare_sample_m(data):
+    """
+    Input:
+    
+        data = list of tuples (N, sample), where
+        N - number of times source was observed,
+        sample - list of frac. polarizations (or any other observable) detected in
+            observations of that source before.
+            
+    Output:
+        list of values with length sum_i(N_i) - sum of observations wuch were taken
+            from each sample N times randomly.
+        """
+
+    result = list()
+    for entry in data:
+        subsample = np.random.choice(entry[1], size=entry[0])
+        result.extend(subsample)
+        
+    return result
+    
 
 if __name__ == '__main__()':
 
@@ -276,15 +297,39 @@ if __name__ == '__main__()':
                   0.126, 0.1126, 0.138, 0.194, 0.109, 0.101]
     ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876, 0.123, 0.77,
                0.057, 0.155]
+    
+    # Preparing data for constructing frac. polarization pdf
+    data = [(1, [0.069, 0.049, 0.065]), (1, [0.021, 0.084, 0.089, 0.048, 0.016,
+                                             0.058, 0.055]),
+            (1, [0.027, 0.014]),
+            (6, [0.105, 0.117, 0.132, 0.115, 0.092, 0.066, 0.093, 0.097, 0.084,
+                 0.058, 0.075, 0.093, 0.117, 0.113, 0.105, 0.105, 0.096, 0.088,
+                 0.098, 0.101, 0.095, 0.081, 0.090, 0.103, 0.139, 0.138, 0.118]),
+            (2, [0.010, 0.015]),
+            (2, [0.017, 0.010, 0.026]),
+            (1, [0.019, 0.015, 0.061, 0.032, 0.046, 0.076, 0.029, 0.039, 0.027,
+                 0.014, 0.024, 0.014, 0.016, 0.037, 0.021, 0.059, 0.058, 0.060,
+                 0.054, 0.064, 0.064, 0.025, 0.042, 0.009, 0.008, 0.007, 0.025,
+                 0.023]),
+            (1, [0.051, 0.045, 0.037, 0.036, 0.028]),
+            (2, [0.031, 0.014, 0.023, 0.019, 0.023, 0.025]),
+            (3, [0.009, 0.004, 0.022, 0.013])]
+
+    datas = list()
+    for i in range(1000):
+        datas.extend(prepare_sample_m(data))
+    # Will use this kde in model distributions
+    kde = gaussian_kde(datas)
 
     # L band D_R
-    #detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208
-    #              ,0.326]
-    #ulimits = [0.0838, 0.075]
+    detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208,
+                  0.326]
+    ulimits = [0.0838, 0.075]
 
     # Preparing distributions
     distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
-                      (genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
+                      (kde.resample, list(), dict()),
+                      #(genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
                       (genbeta, [0.0, 0.2, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
@@ -292,19 +337,19 @@ if __name__ == '__main__()':
     
     # Sampling posterior density of ``d``
 
-    lnpost = LnPost(detections, ulimits, distributions, size=1000, lnpr=lnunif,\
+    lnpost = LnPost(detections, ulimits, distributions, size=10000, lnpr=lnunif,\
                     args=[0., 1.])
 
     # Using affine-invariant MCMC
     nwalkers = 250
     ndim = 1
     p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost, threads=4)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
     pos, prob, state = sampler.run_mcmc(p0, 100)
     sampler.reset()
 
     sampler.run_mcmc(pos, 400)
-    d = sampler.flatchain[:,0][::2].copy()
+    d = sampler.flatchain[:,0][::10].copy()
 
     hist_d, edges_d = histogram(d, normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
@@ -368,6 +413,7 @@ if __name__ == '__main__()':
     simulated_means = map(np.mean, simulated_datas)
     simulated_maxs = map(np.max, simulated_datas)
     simulated_mins = map(np.min, simulated_datas)
+    simulated_meds = map(np.median, simulated_datas)
 
     # Histograms of statistics for simalated data
     hist_means, edges_means = histogram(simulated_means, normed=True)
@@ -382,10 +428,15 @@ if __name__ == '__main__()':
     lower_mins = np.resize(edges_mins, len(edges_mins) - 1)
     bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], color='b', alpha=0.5)
 
+    hist_meds, edges_meds = histogram(simulated_meds, normed=True)
+    lower_meds = np.resize(edges_meds, len(edges_meds) - 1)
+    bar(lower_meds, hist_meds, width=np.diff(lower_meds)[0], color='y', alpha=0.5)
+    
     # Draw realized data's statistic
     axvline(x=np.mean(detections), linewidth=2, color='g')
     axvline(x=np.min(detections), linewidth=2, color='b')
     axvline(x=np.max(detections), linewidth=2, color='r')
+    axvline(x=np.median(detections), linewidth=2, color='y')
 
     # Draw 5% & 95% borders
     axvline(x=percent(simulated_means, perc=5.0), color='g')
@@ -394,9 +445,11 @@ if __name__ == '__main__()':
     axvline(x=percent(simulated_maxs, perc=95.0), color='r')
     axvline(x=percent(simulated_mins, perc=5.0), color='b')
     axvline(x=percent(simulated_mins, perc=95.0), color='b')
+    axvline(x=percent(simulated_meds, perc=5.0), color='y')
+    axvline(x=percent(simulated_meds, perc=95.0), color='y')
 
     # Using MH MCMC
-    p0 = [0.5]
+    p0 = [0.1]
     sampler_mh = emcee.MHSampler(cov=[[0.05]], dim=1, lnprobfn=lnpost)
     for results in sampler_mh.sample(p0, iterations=1000):
         pass
