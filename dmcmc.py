@@ -22,7 +22,8 @@ class LnPost(object):
 
     """
 
-    def __init__(self, detections, ulimits, distributions, size=None, lnpr=None, args=None):
+    def __init__(self, detections, ulimits, distributions, size=None, lnpr=None,
+                 args=None):
         self._lnpr = lnpr
         self.args = args
         self._lnlike = LnLike(detections, ulimits, distributions, size=size)
@@ -81,6 +82,7 @@ class LnLike(object):
         """
 
         ratio_distribution = self.model(d)
+        print "Ratio distribution for this d is : " + str(ratio_distribution)
         print "Done modeling ratio distibution!"
         lnlks_detections = self.lnprob(self.detections, ratio_distribution)
         print "Ln of prob. for detections is : " + str(lnlks_detections)
@@ -108,7 +110,7 @@ class LnLike(object):
 
         data = self.distributions
 
-        result = data[1]() * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *
+        result = data[1]()[0,:] * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *
                                                                          data[4]()) + d * np.exp(1j * data[5]())
 
         return data[0]() * np.sqrt((result * result.conjugate()).real)
@@ -345,7 +347,7 @@ if __name__ == '__main__()':
     ndim = 1
     p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
     sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
-    pos, prob, state = sampler.run_mcmc(p0, 100)
+    pos, prob, state = sampler.run_mcmc(p0, 50)
     sampler.reset()
 
     sampler.run_mcmc(pos, 400)
