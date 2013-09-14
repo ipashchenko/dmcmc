@@ -82,13 +82,12 @@ class LnLike(object):
         """
 
         ratio_distribution = self.model(d)
-        lnlks_detections = self.lnprob(self.detections, ratio_distribution)
+        lnlk_detections = self.lnprob(self.detections, ratio_distribution)
         #print "Ln of prob. for detections is : " + str(lnlks_detections)
-        lnlks_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
+        lnlk_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
         #print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
 
-        lnlks = lnlks_detections + lnlks_ulimits
-        lnlk = lnlks.sum()
+        lnlk = lnlk_detections + lnlk_ulimits
         
         print "LnLikelihood is: " + str(lnlk)
 
