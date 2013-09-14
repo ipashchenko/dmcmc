@@ -160,8 +160,7 @@ class LnLike(object):
         probs = np.zeros(len(xs))
 
         if kind is None:
-            for i in range(len(probs)):
-                probs[i] = kde(xs).sum()
+            probs = kde(xs)
         elif kind is 'u':
             for i in range(len(probs)):
                 probs[i] = kde.integrate_box_1d(min(distribution), xs[i])
@@ -310,6 +309,46 @@ def choice(data, size=1):
     
     return data[indxs]
     
+
+def pickle_results(fname, sampler, detections):
+    """
+    Function that pickle results of sampling in dictionary with keys: chain,
+    flatchain, acceptance_fraction, thermodynamic_integration_log_evidence (PT).
+    """
+    
+    import pickle
+    
+    d = sampler.flatchain[:,0][::10].copy()
+    if hasattr(sampler, logl):
+        fn = sampler.logl.model_vectorized
+    else:
+        fn = sampler.lnprobfn.f._lnlike.model_vectorized
+        
+    print "Calculating simulated predicted ratios (replicas)"
+    predictive_ratios = fn(d)
+    simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
+                      in predictive_ratios]
+    simulated_means = map(np.mean, simulated_datas)
+    simulated_maxs = map(np.max, simulated_datas)
+    simulated_mins = map(np.min, simulated_datas)
+
+    print "Checking for log_evidence"
+    try:
+        tdi_log_evidence = sampler.thermodynamic_integration_log_evidence
+        print "Found evidence!"
+    except AttributeError:
+        tdi_log_evidence = None
+        print "No evidence found"
+
+    dict_ = {'chain': sampler.chain, 'flatchain': sampler.flatchain,
+             'acceptance_fraction': sampler.acceptance_fraction,
+             'thermodynamic_integration_log_evidence': tdi_log_evidence,
+             'simulated_mins': simulated_mins, 'file': fname, 'simulated_maxs':
+             simulated_maxs, 'simulated_means': simulated_means}
+    
+    file_ = open(fname, 'wb')
+    pickle.dump(dict_, file_)
+    file_.close()
     
 
 if __name__ == '__main__()':
@@ -352,8 +391,9 @@ if __name__ == '__main__()':
     distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
                       #(kde.resample, list(), dict()),
                       (genbeta, [0.0, 0.1, 2.0, 3.0], dict(),),
+                      #(np.random.uniform, list(), {'low': 0.0, 'high': 0.2}),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.0, 0.2, 3.0, 8.0], dict(),),
+                      (genbeta, [0.0, 0.1, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
     
@@ -372,10 +412,16 @@ if __name__ == '__main__()':
 
     sampler.run_mcmc(pos, 200)
     d = sampler.flatchain[:,0][::10].copy()
+    d = sampler.chain[:,::10,0].T.reshape(5000)
 
     hist_d, edges_d = histogram(d, normed=True)
     lower_d = np.resize(edges_d, len(edges_d) - 1)
-    bar(lower_d, hist_d, width=np.diff(lower_d)[0], color='g', alpha=0.5)
+    bar(lower_d, hist_d, width=np.diff(lower_d)[0], linewidth=1, color='w')
+    axvline(x=percent(d, perc=2.5), color='k', ls='--')
+    axvline(x=percent(d, perc=97.5), color='k', ls='--')
+    font = {'family': 'Droid Sans', 'weight': 'normal', 'size': 18}
+    xlabel(ur"$L$-диапазон $D_{R}$")
+    ylabel(ur"плотность вероятности")
 
 
     # Using PT
@@ -428,6 +474,7 @@ if __name__ == '__main__()':
 
     # Predictive density analysis
     predictive_ratios = logl.model_vectorized(d)
+    predictive_ratios = lnpost._lnlike.model_vectorized(d)
     # dim = (len(d), len(distributions[i]))
     simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
                       in predictive_ratios]
@@ -437,39 +484,49 @@ if __name__ == '__main__()':
     simulated_mins = map(np.min, simulated_datas)
     simulated_meds = map(np.median, simulated_datas)
 
-    # Histograms of statistics for simalated data
+    # Histograms of statistics for simulated data, realized data's statistic
     hist_means, edges_means = histogram(simulated_means, normed=True)
     lower_means = np.resize(edges_means, len(edges_means) - 1)
-    bar(lower_means, hist_means, width=np.diff(lower_means)[0], color='g', alpha=0.5)
+    # Should i include alpha?
+    bar(lower_means, hist_means, width=np.diff(lower_means)[0], linewidth=1,
+        color='w')
+    axvline(x=np.mean(detections), linewidth=2, color='k')
+    axvline(x=percent(simulated_means, perc=5.0), color='k', ls='--')
+    axvline(x=percent(simulated_means, perc=95.0), color='k', ls='--')
+    font = {'family': 'Droid Sans', 'weight': 'normal', 'size': 18}
+    xlabel(ur"$L$-диапазон $D_{R}$")
+    ylabel(ur"плотность вероятности")
 
     hist_maxs, edges_maxs = histogram(simulated_maxs, normed=True)
     lower_maxs = np.resize(edges_maxs, len(edges_maxs) - 1)
-    bar(lower_maxs, hist_maxs, width=np.diff(lower_maxs)[0], color='r', alpha=0.5)
+    bar(lower_maxs, hist_maxs, width=np.diff(lower_maxs)[0], linewidth=1,
+        color='w')
+    axvline(x=np.max(detections), linewidth=2, color='k')
+    axvline(x=percent(simulated_maxs, perc=5.0), color='k', ls='--')
+    axvline(x=percent(simulated_maxs, perc=95.0), color='k', ls='--')
+    xlabel(ur"$L$-диапазон $D_{R}$")
+    ylabel(ur"плотность вероятности")
 
     hist_mins, edges_mins = histogram(simulated_mins, normed=True)
     lower_mins = np.resize(edges_mins, len(edges_mins) - 1)
-    bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], color='b', alpha=0.5)
+    bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], linewidth=1,
+        color='w')
+    axvline(x=np.min(detections), linewidth=2, color='k')
+    axvline(x=percent(simulated_mins, perc=5.0), color='k', ls='--')
+    axvline(x=percent(simulated_mins, perc=95.0), color='k', ls='--')
+    xlabel(ur"$L$-диапазон $D_{R}$")
+    ylabel(ur"плотность вероятности")
 
     hist_meds, edges_meds = histogram(simulated_meds, normed=True)
     lower_meds = np.resize(edges_meds, len(edges_meds) - 1)
-    bar(lower_meds, hist_meds, width=np.diff(lower_meds)[0], color='y', alpha=0.5)
+    bar(lower_meds, hist_meds, width=np.diff(lower_meds)[0], linewidth=1,
+        color='w')
+    axvline(x=np.median(detections), linewidth=2, color='k')
+    axvline(x=percent(simulated_meds, perc=5.0), color='k', ls='--')
+    axvline(x=percent(simulated_meds, perc=95.0), color='k', ls='--')
+    xlabel(ur"$L$-диапазон $D_{R}$")
+    ylabel(ur"плотность вероятности")
     
-    # Draw realized data's statistic
-    axvline(x=np.mean(detections), linewidth=2, color='g')
-    axvline(x=np.min(detections), linewidth=2, color='b')
-    axvline(x=np.max(detections), linewidth=2, color='r')
-    axvline(x=np.median(detections), linewidth=2, color='y')
-
-    # Draw 5% & 95% borders
-    axvline(x=percent(simulated_means, perc=5.0), color='g')
-    axvline(x=percent(simulated_means, perc=95.0), color='g')
-    axvline(x=percent(simulated_maxs, perc=5.0), color='r')
-    axvline(x=percent(simulated_maxs, perc=95.0), color='r')
-    axvline(x=percent(simulated_mins, perc=5.0), color='b')
-    axvline(x=percent(simulated_mins, perc=95.0), color='b')
-    axvline(x=percent(simulated_meds, perc=5.0), color='y')
-    axvline(x=percent(simulated_meds, perc=95.0), color='y')
-
     # Using MH MCMC
     p0 = [0.1]
     sampler_mh = emcee.MHSampler(cov=[[0.05]], dim=1, lnprobfn=lnpost)
