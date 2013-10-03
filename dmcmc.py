@@ -382,8 +382,7 @@ if __name__ == '__main__()':
     kde = gaussian_kde(datas)
 
     # L band D_R
-    detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208,
-                  0.326]
+    detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
     ulimits = [0.0838, 0.075]
 
     # Preparing distributions

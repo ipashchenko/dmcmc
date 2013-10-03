@@ -1,0 +1,226 @@
+
+
+data = [(1, [0.069, 0.049, 0.065]), (1, [0.021, 0.084, 0.089, 0.048, 0.016,
+                                             0.058, 0.055]),
+            (1, [0.027, 0.014]),
+            (6, [0.105, 0.117, 0.132, 0.115, 0.092, 0.066, 0.093, 0.097, 0.084,
+                 0.058, 0.075, 0.093, 0.117, 0.113, 0.105, 0.105, 0.096, 0.088,
+                 0.098, 0.101, 0.095, 0.081, 0.090, 0.103, 0.139, 0.138, 0.118]),
+            (2, [0.010, 0.015]),
+            (2, [0.017, 0.010, 0.026]),
+            (1, [0.019, 0.015, 0.061, 0.032, 0.046, 0.076, 0.029, 0.039, 0.027,
+                 0.014, 0.024, 0.014, 0.016, 0.037, 0.021, 0.059, 0.058, 0.060,
+                 0.054, 0.064, 0.064, 0.025, 0.042, 0.009, 0.008, 0.007, 0.025,
+                 0.023]),
+            (1, [0.051, 0.045, 0.037, 0.036, 0.028]),
+            (2, [0.031, 0.014, 0.023, 0.019, 0.023, 0.025]),
+            (3, [0.009, 0.004, 0.022, 0.013])]
+
+datas = list()
+for i in range(1000):
+    datas.extend(prepare_sample_m(data))
+kde = gaussian_kde(datas)
+
+plot(arange(150)/1000., kde(arange(150)/1000.), color='k')
+hist_d, edges_d = histogram(datas, normed=True)
+lower_d = np.resize(edges_d, len(edges_d) - 1)
+bar(lower_d, hist_d, width=np.diff(lower_d)[0], linewidth=1, color='w')
+xlabel(ur"степень поляризации $m$")
+ylabel(ur"плотность вероятности")
+
+#########################PT MCMC##################################
+import sys
+sys.path.append('/home/ilya/work/emcee')
+import math
+import emcee
+import numpy as np
+from scipy import special
+from knuth_hist import histogram
+from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
+from scipy.stats.kde import gaussian_kde
+from dmcmc import LnPost, LnLike, genbeta, prepare_sample_m, logp
+
+detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
+ulimits = [0.0838, 0.075]
+
+#detections = [0.143, 0.231, 0.077, 0.09, 0.152, 0.115, 0.1432, 0.1696, 0.1528,
+#                  0.126, 0.1126, 0.138, 0.194, 0.109, 0.101]
+#ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876, 0.123, 0.77,
+#               0.057, 0.155]
+
+distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
+                      #(kde.resample, list(), dict()),
+                      (genbeta, [0.10, 0.20, 2.0, 3.0], dict(),),
+                      #(np.random.uniform, list(), {'low': 0.0, 'high': 0.2}),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (genbeta, [0.01, 0.20, 2.0, 5.0], dict(),),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
+                      
+ntemps = 20
+nwalkers = 100
+ndim = 1
+# logLikelihood
+logl = LnLike(detections, ulimits, distributions, size=10000)
+# logprior
+logp = logp
+# Initializing sampler
+sampler = emcee.PTSampler(ntemps, nwalkers, ndim, logl, logp)
+# Generating starting values
+p0 = np.random.uniform(low=0.05, high=0.2, size=(ntemps, nwalkers, ndim))
+# Burn-in
+for p, lnprob, lnlike in sampler.sample(p0, iterations=25):
+    pass
+
+sampler.reset()
+
+for p, lnprob, lnlike in sampler.sample(p, lnprob0=lnprob,
+                                        lnlike0=lnlike,
+                                        iterations=200):
+    pass
+
+
+
+######################MCMC#########################
+import sys
+sys.path.append('/home/ilya/work/emcee')
+import math
+import emcee
+import numpy as np
+from scipy import special
+from knuth_hist import histogram
+from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
+from scipy.stats.kde import gaussian_kde
+from dmcmc import LnPost, LnLike, genbeta, prepare_sample_m, logp, lnunif
+
+#detections = [0.143, 0.231, 0.077, 0.09, 0.152, 0.115, 0.1432, 0.1696, 0.1528,
+                  0.126, 0.1126, 0.138, 0.194, 0.109, 0.101]
+#ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876, 0.123, 0.77,
+               0.057, 0.155]
+               
+detections = [0.1553, 0.1655, 0.263, 0.0465, 0.148, 0.195, 0.125, 0.112, 0.208]
+ulimits = [0.0838, 0.075]
+            
+                    
+distributions = ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
+                      #(kde.resample, list(), dict()),
+                      (genbeta, [0.00, 0.05, 2.0, 3.0], dict(),),
+                      #(np.random.uniform, list(), {'low': 0.0, 'high': 0.2}),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (genbeta, [0.01, 0.20, 2.0, 5.0], dict(),),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
+                      (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
+lnpost = LnPost(detections, ulimits, distributions, size=10000, lnpr=lnunif,\
+                args=[0., 1.])
+nwalkers = 250
+ndim = 1
+p0 = np.random.uniform(low=0.05, high=0.2, size=(nwalkers, ndim))
+sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
+pos, prob, state = sampler.run_mcmc(p0, 50)
+
+sampler.reset()
+
+sampler.run_mcmc(pos, 200)
+
+#############################SAVING RESULTS###################################################
+    
+    
+import pickle
+fname = 'L_MOJAVE_PT.pkl'
+d = sampler.chain[0,:,::10].T.reshape(2000)
+fn = sampler.logl.model_vectorized
+predictive_ratios = fn(d)
+simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
+                   in predictive_ratios]
+simulated_means = map(np.mean, simulated_datas)
+simulated_maxs = map(np.max, simulated_datas)
+simulated_mins = map(np.min, simulated_datas)
+dict_ = {'chain': sampler.chain, 'flatchain': sampler.flatchain,
+         'acceptance_fraction': sampler.acceptance_fraction,
+         'thermodynamic_integration_log_evidence': sampler.thermodynamic_integration_log_evidence(),
+         'simulated_mins': simulated_mins, 'file': fname, 'simulated_maxs':
+         simulated_maxs, 'simulated_means': simulated_means}
+print sampler.thermodynamic_integration_log_evidence() 
+file_ = open(fname, 'wb')
+pickle.dump(dict_, file_)
+file_.close()
+
+
+import pickle
+fname = 'L_M0d00_0d05_noPT.pkl'
+d = sampler.chain[:,::10,0].T.reshape(5000)
+fn = sampler.lnprobfn.f._lnlike.model_vectorized
+predictive_ratios = fn(d)
+simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
+                   in predictive_ratios]
+simulated_means = map(np.mean, simulated_datas)
+simulated_maxs = map(np.max, simulated_datas)
+simulated_mins = map(np.min, simulated_datas)
+dict_ = {'chain': sampler.chain, 'flatchain': sampler.flatchain,
+         'acceptance_fraction': sampler.acceptance_fraction,
+         'simulated_mins': simulated_mins, 'file': fname, 'simulated_maxs':
+         simulated_maxs, 'simulated_means': simulated_means}    
+file_ = open(fname, 'wb')
+pickle.dump(dict_, file_)
+file_.close()
+
+#####################loading and plotting#######################
+
+import pickle
+file_ = open('L_M0d10_0d20.pkl', 'rb')
+dict_ = pickle.load(file_)
+file_.close()
+chain = dict_['chain']
+simulated_mins = dict_['simulated_mins']
+simulated_maxs = dict_['simulated_maxs']
+simulated_means = dict_['simulated_means']
+thermodynamic_integration_log_evidence = dict_['thermodynamic_integration_log_evidence']
+print thermodynamic_integration_log_evidence
+
+d = chain[:,::10,0].T.reshape(5000)
+
+hist_d, edges_d = histogram(d, normed=True)
+lower_d = np.resize(edges_d, len(edges_d) - 1)
+bar(lower_d, hist_d, width=np.diff(lower_d)[0], linewidth=1, color='w')
+axvline(x=percent(d, perc=2.5), color='k', ls='--')
+axvline(x=percent(d, perc=97.5), color='k', ls='--')
+font = {'family': 'Droid Sans', 'weight': 'normal', 'size': 18}
+xlabel(ur"$C$-диапазон $D_{L}$")
+ylabel(ur"апостериорная плотность вероятности")
+
+hist_means, edges_means = histogram(simulated_means, normed=True)
+lower_means = np.resize(edges_means, len(edges_means) - 1)
+# Should i include alpha?
+bar(lower_means, hist_means, width=np.diff(lower_means)[0], linewidth=1,
+    color='w')
+axvline(x=np.mean(detections), linewidth=2, color='k')
+axvline(x=percent(simulated_means, perc=5.0), color='k', ls='--')
+axvline(x=percent(simulated_means, perc=95.0), color='k', ls='--')
+font = {'family': 'Droid Sans', 'weight': 'normal', 'size': 18}
+xlabel(ur"$C$-диапазон $D_{L}$")
+ylabel(ur"плотность вероятности")
+
+hist_maxs, edges_maxs = histogram(simulated_maxs, normed=True)
+lower_maxs = np.resize(edges_maxs, len(edges_maxs) - 1)
+bar(lower_maxs, hist_maxs, width=np.diff(lower_maxs)[0], linewidth=1,
+    color='w')
+axvline(x=np.max(detections), linewidth=2, color='k')
+axvline(x=percent(simulated_maxs, perc=5.0), color='k', ls='--')
+axvline(x=percent(simulated_maxs, perc=95.0), color='k', ls='--')
+xlabel(ur"$C$-диапазон $D_{L}$")
+ylabel(ur"плотность вероятности")
+
+hist_mins, edges_mins = histogram(simulated_mins[100:], normed=True)
+lower_mins = np.resize(edges_mins, len(edges_mins) - 1)
+bar(lower_mins, hist_mins, width=np.diff(lower_mins)[0], linewidth=1,
+    color='w')
+axvline(x=np.min(detections), linewidth=2, color='k')
+axvline(x=percent(simulated_mins, perc=5.0), color='k', ls='--')
+axvline(x=percent(simulated_mins, perc=95.0), color='k', ls='--')
+xlabel(ur"$C$-диапазон $D_{L}$")
+ylabel(ur"плотность вероятности")
+
+
+
+
+
