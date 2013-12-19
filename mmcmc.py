@@ -6,7 +6,7 @@ sys.path.append('/home/ilya/work/emcee')
 import math
 import emcee
 import numpy as np
-import numdifftools as nd
+#import numdifftools as nd
 from scipy import special
 from scipy import optimize
 #from knuth_hist import histogram
