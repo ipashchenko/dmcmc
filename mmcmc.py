@@ -23,11 +23,11 @@ class LnPost(object):
     other model parameters.
     """
 
-    def __init__(self, detections, ulimits, distributions, size=None, lnpr=None,
+    def __init__(self, detections, ulimits, distributions, lnpr=None,
                  args=None):
         self._lnpr = lnpr
         self.args = args
-        self._lnlike = LnLike(detections, ulimits, distributions, size=size)
+        self._lnlike = LnLike(detections, ulimits, distributions)
 
     def lnpr(self, p):
         return self._lnpr(p, *self.args)
@@ -44,7 +44,7 @@ class LnLike(object):
     Class representing Likelihood function.
     """
 
-    def __init__(self, detections, ulimits, distributions, size=None):
+    def __init__(self, detections, ulimits, distributions):
         """
         Parameters:
 
@@ -65,16 +65,7 @@ class LnLike(object):
 
         self.detections = detections
         self.ulimits = ulimits
-        self.size = size
-        self.distributions = list()
-
-        # Size of model distributions must be specified
-        assert(self.size)
-
-        for entry in distributions:
-            entry[2].update({'size': self.size})
-            self.distributions.append(_distribution_wrapper(entry[0],
-                                                            entry[1], entry[2]))
+        self.distributions = distributions
 
     def __call__(self, p):
         """
@@ -90,6 +81,7 @@ class LnLike(object):
         lnlk = lnlk_detections + lnlk_ulimits
 
         print "LnLikelihood is: " + str(lnlk)
+        print "p is " + str(p)
 
         return lnlk
 
@@ -110,13 +102,13 @@ class LnLike(object):
         data = self.distributions
 
         try:
-            result = data[1]()[0, :] * np.exp(1j * data[2]()) + data[3]() *\
-                     np.exp(1j * data[4]()) + p * np.exp(1j * data[5]())
+            result = data[1][0, :] * np.exp(1j * data[2]) + data[3] *\
+                     np.exp(1j * data[4]) + p * np.exp(1j * data[5])
         except IndexError:
-            result = data[1]() * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *\
-                     data[4]()) + p * np.exp(1j * data[5]())
+            result = data[1] * np.exp(1j * data[2]) + data[3] * np.exp(1j *\
+                     data[4]) + p * np.exp(1j * data[5])
 
-        return data[0]() * np.sqrt((result * np.conj(result)).real)
+        return data[0] * np.sqrt((result * np.conj(result)).real)
 
     def model_vectorized(self, p):
         """
@@ -163,7 +155,8 @@ class LnLike(object):
             probs = kde(xs)
         elif kind is 'u':
             for i in range(len(probs)):
-                probs[i] = kde.integrate_box_1d(min(distribution), xs[i])
+                # For ratio distribution minimum is zero!
+                probs[i] = kde.integrate_box_1d(0, xs[i])
         elif kind is 'l':
             raise NotImplementedError('Please, implement lower limits!')
         else:
@@ -172,6 +165,10 @@ class LnLike(object):
 
         result = np.log(probs).sum()
 
+        print "LnLike.lnprob returned " + str(result)
+        if result is np.NaN:
+            print xs, distribution
+            print len(xs), len(distribution)
         return result
 
 
@@ -332,7 +329,7 @@ if __name__ == '__main__()':
     distributions = ((np.random.lognormal, list(),
                       {'mean': 0.0, 'sigma': 0.25}),
                      # zeropol
-                     (genbeta, [0.0, 0.05, 1.0, 8.0],
+                     (genbeta, [0.0, 0.1, 1.0, 8.0],
                      dict(),),
                      # lowpol
                       #(genbeta, [0.0, 0.05, 2.0, 3.0],
@@ -342,11 +339,32 @@ if __name__ == '__main__()':
                       # dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.01, 0.10, 3.0, 8.0], dict(),),
+                      (genbeta, [0.01, 0.15, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}))
+
+    # Preparing distributions
+    distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
+                          (vec_lngenbeta,[1.0, 8.0, 0.0, 0.1]),
+                          (vec_lnunif,[-math.pi,math.pi]),
+                          (vec_lngenbeta, [3.0, 8.0, 0.01, 0.15]),
+                          (vec_lnunif, [-math.pi,math.pi]),
+                          (vec_lnunif, [-math.pi,math.pi]))
+    distributions = list()
+    # Setting up emcee
+    nwalkers = 200
+    ndim = 1
+    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
+    for (func, args) in distributions_data:
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
+                                        bcast=True)
+        pos, prob, state = sampler.run_mcmc(p0, 500)
+        sampler.reset()
+        sampler.run_mcmc(pos, 1000)
+        # Using only 10000 points for specifying distributions
+        distributions.append(sampler.flatchain[:,0][::20].copy())
 
     # Sampling posterior density of ``p``
 
@@ -366,11 +384,11 @@ if __name__ == '__main__()':
     # Or use kde
     from scipy.stats.kde import gaussian_kde
     kde = gaussian_kde(detections)
-    newdets = kde.resample(size=1000)[0]
+    newdets = kde.resample(size=200)[0]
 
     # Now analize each data sample to find D_RA
     lnpost = LnPost(newdets, ulimits, distributions, size=10000,
-                    lnpr=vec_lnunif, args=[0.0, 0.2])
+                    lnpr=vec_lnunif, args=[0.0, 1.0])
 
     # Using affine-invariant MCMC
     nwalkers = 250
