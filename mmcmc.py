@@ -23,11 +23,11 @@ class LnPost(object):
     other model parameters.
     """
 
-    def __init__(self, detections, ulimits, distributions, size=None, lnpr=None,
+    def __init__(self, detections, ulimits, distributions, lnpr=None,
                  args=None):
         self._lnpr = lnpr
         self.args = args
-        self._lnlike = LnLike(detections, ulimits, distributions, size=size)
+        self._lnlike = LnLike(detections, ulimits, distributions)
 
     def lnpr(self, p):
         return self._lnpr(p, *self.args)
@@ -44,7 +44,7 @@ class LnLike(object):
     Class representing Likelihood function.
     """
 
-    def __init__(self, detections, ulimits, distributions, size=None):
+    def __init__(self, detections, ulimits, distributions):
         """
         Parameters:
 
@@ -65,16 +65,7 @@ class LnLike(object):
 
         self.detections = detections
         self.ulimits = ulimits
-        self.size = size
-        self.distributions = list()
-
-        # Size of model distributions must be specified
-        assert(self.size)
-
-        for entry in distributions:
-            entry[2].update({'size': self.size})
-            self.distributions.append(_distribution_wrapper(entry[0],
-                                                            entry[1], entry[2]))
+        self.distributions = distributions
 
     def __call__(self, p):
         """
@@ -111,13 +102,13 @@ class LnLike(object):
         data = self.distributions
 
         try:
-            result = data[1]()[0, :] * np.exp(1j * data[2]()) + data[3]() *\
-                     np.exp(1j * data[4]()) + p * np.exp(1j * data[5]())
+            result = data[1][0, :] * np.exp(1j * data[2]) + data[3] *\
+                     np.exp(1j * data[4]) + p * np.exp(1j * data[5])
         except IndexError:
-            result = data[1]() * np.exp(1j * data[2]()) + data[3]() * np.exp(1j *\
-                     data[4]()) + p * np.exp(1j * data[5]())
+            result = data[1] * np.exp(1j * data[2]) + data[3] * np.exp(1j *\
+                     data[4]) + p * np.exp(1j * data[5])
 
-        return data[0]() * np.sqrt((result * np.conj(result)).real)
+        return data[0] * np.sqrt((result * np.conj(result)).real)
 
     def model_vectorized(self, p):
         """
@@ -348,11 +339,32 @@ if __name__ == '__main__()':
                       # dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.01, 0.10, 3.0, 8.0], dict(),),
+                      (genbeta, [0.01, 0.15, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}))
+
+    # Preparing distributions
+    distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
+                          (vec_lngenbeta,[1.0, 8.0, 0.0, 0.1]),
+                          (vec_lnunif,[-math.pi,math.pi]),
+                          (vec_lngenbeta, [3.0, 8.0, 0.01, 0.15]),
+                          (vec_lnunif, [-math.pi,math.pi]),
+                          (vec_lnunif, [-math.pi,math.pi]))
+    distributions = list()
+    # Setting up emcee
+    nwalkers = 200
+    ndim = 1
+    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
+    for (func, args) in distributions_data:
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
+                                        bcast=True)
+        pos, prob, state = sampler.run_mcmc(p0, 500)
+        sampler.reset()
+        sampler.run_mcmc(pos, 1000)
+        # Using only 10000 points for specifying distributions
+        distributions.append(sampler.flatchain[:,0][::20].copy())
 
     # Sampling posterior density of ``p``
 
