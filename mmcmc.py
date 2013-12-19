@@ -90,6 +90,7 @@ class LnLike(object):
         lnlk = lnlk_detections + lnlk_ulimits
 
         print "LnLikelihood is: " + str(lnlk)
+        print "p is " + str(p)
 
         return lnlk
 
@@ -163,7 +164,8 @@ class LnLike(object):
             probs = kde(xs)
         elif kind is 'u':
             for i in range(len(probs)):
-                probs[i] = kde.integrate_box_1d(min(distribution), xs[i])
+                # For ratio distribution minimum is zero!
+                probs[i] = kde.integrate_box_1d(0, xs[i])
         elif kind is 'l':
             raise NotImplementedError('Please, implement lower limits!')
         else:
@@ -172,6 +174,10 @@ class LnLike(object):
 
         result = np.log(probs).sum()
 
+        print "LnLike.lnprob returned " + str(result)
+        if result is np.NaN:
+            print xs, distribution
+            print len(xs), len(distribution)
         return result
 
 
@@ -332,7 +338,7 @@ if __name__ == '__main__()':
     distributions = ((np.random.lognormal, list(),
                       {'mean': 0.0, 'sigma': 0.25}),
                      # zeropol
-                     (genbeta, [0.0, 0.05, 1.0, 8.0],
+                     (genbeta, [0.0, 0.1, 1.0, 8.0],
                      dict(),),
                      # lowpol
                       #(genbeta, [0.0, 0.05, 2.0, 3.0],
@@ -366,11 +372,11 @@ if __name__ == '__main__()':
     # Or use kde
     from scipy.stats.kde import gaussian_kde
     kde = gaussian_kde(detections)
-    newdets = kde.resample(size=1000)[0]
+    newdets = kde.resample(size=200)[0]
 
     # Now analize each data sample to find D_RA
     lnpost = LnPost(newdets, ulimits, distributions, size=10000,
-                    lnpr=vec_lnunif, args=[0.0, 0.2])
+                    lnpr=vec_lnunif, args=[0.0, 1.0])
 
     # Using affine-invariant MCMC
     nwalkers = 250

@@ -27,13 +27,13 @@ class LnPost(object):
         self._lnpr = lnpr
         self.args = args
         self._lnlike = LnLike(detections, ulimits, distributions, size=size)
-        
+
     def lnpr(self, d):
         return self._lnpr(d, *self.args)
-    
+
     def lnlike(self, d):
         return self._lnlike.__call__(d)
-        
+
     def __call__(self, d):
         return self.lnlike(d) + self.lnpr(d)
 
@@ -65,10 +65,10 @@ class LnLike(object):
         self.ulimits = ulimits
         self.size=size
         self.distributions = list()
-        
+
         # Size of model distributions must be specified
         assert(self.size)
-        
+
         for entry in distributions:
             entry[2].update({'size': self.size})
             self.distributions.append(_distribution_wrapper(entry[0],
@@ -88,8 +88,9 @@ class LnLike(object):
         #print "Ln of prob. for ulimits is : " + str(lnlks_ulimits)
 
         lnlk = lnlk_detections + lnlk_ulimits
-        
+
         print "LnLikelihood is: " + str(lnlk)
+        print "p is " + str(p)
 
         return lnlk
 
@@ -162,7 +163,8 @@ class LnLike(object):
             probs = kde(xs)
         elif kind is 'u':
             for i in range(len(probs)):
-                probs[i] = kde.integrate_box_1d(min(distribution), xs[i])
+                # For ratio distribution minimum is zero!
+                probs[i] = kde.integrate_box_1d(0, xs[i])
         elif kind is 'l':
             raise NotImplementedError('Please, implement lower limits!')
         else:
@@ -179,7 +181,7 @@ class _distribution_wrapper(object):
     This is a hack to make the distribution function pickleable when ``args``
     and ``kwargs`` are also included.
     """
-    
+
     def __init__(self, f, args, kwargs):
         self.f = f
         self.args = args
@@ -196,7 +198,7 @@ class _distribution_wrapper(object):
                 print("  exception:")
                 traceback.print_exc()
                 raise
-            
+
 
 def lnunif(x, a, b):
     """
@@ -275,12 +277,12 @@ def genbeta(a, b, *args, **kwargs):
 def prepare_sample_m(data):
     """
     Input:
-    
+
         data = list of tuples (N, sample), where
         N - number of times source was observed,
         sample - list of frac. polarizations (or any other observable) detected in
             observations of that source before.
-            
+
     Output:
         list of values with length sum_i(N_i) - sum of observations wuch were taken
             from each sample N times randomly.
@@ -292,37 +294,37 @@ def prepare_sample_m(data):
             subsample = np.random.choice(entry[1], size=entry[0])
         except AttributeError:
             subsample = choice(entry[1], size=entry[0])
-            
+
         result.extend(subsample)
-        
+
     return result
 
 
 def choice(data, size=1):
-    
+
     data = np.asarray(data)
     assert(data.ndim == 1)
     len_ = len(data) - 1
-    
+
     indxs = np.random.random_integers(0, high=len_, size=size)
-    
+
     return data[indxs]
-    
+
 
 def pickle_results(fname, sampler, detections):
     """
     Function that pickle results of sampling in dictionary with keys: chain,
     flatchain, acceptance_fraction, thermodynamic_integration_log_evidence (PT).
     """
-    
+
     import pickle
-    
+
     d = sampler.flatchain[:,0][::10].copy()
     if hasattr(sampler, logl):
         fn = sampler.logl.model_vectorized
     else:
         fn = sampler.lnprobfn.f._lnlike.model_vectorized
-        
+
     print "Calculating simulated predicted ratios (replicas)"
     predictive_ratios = fn(d)
     simulated_datas = [np.random.choice(ratio, size=len(detections)) for ratio
@@ -344,11 +346,11 @@ def pickle_results(fname, sampler, detections):
              'thermodynamic_integration_log_evidence': tdi_log_evidence,
              'simulated_mins': simulated_mins, 'file': fname, 'simulated_maxs':
              simulated_maxs, 'simulated_means': simulated_means}
-    
+
     file_ = open(fname, 'wb')
     pickle.dump(dict_, file_)
     file_.close()
-    
+
 
 if __name__ == '__main__()':
 
@@ -357,7 +359,7 @@ if __name__ == '__main__()':
                   0.126, 0.1126, 0.138, 0.194, 0.109, 0.101]
     ulimits = [0.175, 0.17, 0.17, 0.088, 0.187, 0.1643, 0.0876, 0.123, 0.77,
                0.057, 0.155]
-    
+
     # Preparing data for constructing frac. polarization pdf
     data = [(1, [0.069, 0.049, 0.065]), (1, [0.021, 0.084, 0.089, 0.048, 0.016,
                                              0.058, 0.055]),
@@ -394,7 +396,7 @@ if __name__ == '__main__()':
                       (genbeta, [0.0, 0.1, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
                       (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
-    
+
     # Sampling posterior density of ``d``
 
     lnpost = LnPost(detections, ulimits, distributions, size=10000, lnpr=lnunif,\
@@ -524,7 +526,7 @@ if __name__ == '__main__()':
     axvline(x=percent(simulated_meds, perc=95.0), color='k', ls='--')
     xlabel(ur"$L$-диапазон $D_{R}$")
     ylabel(ur"плотность вероятности")
-    
+
     # Using MH MCMC
     p0 = [0.1]
     sampler_mh = emcee.MHSampler(cov=[[0.05]], dim=1, lnprobfn=lnpost)
