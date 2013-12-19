@@ -113,15 +113,15 @@ class LnPrior(object):
         if kind is 'skeptical':
 
             self.r_mu = 0
-            self.r_sigma = 0.25
+            self.r_sigma = 0.1
 
             self.m_min = 0.0
-            self.m_max = 0.1
+            self.m_max = 0.05
 
             self.dgrt_min = 0.01
-            self.dgrt_max = 0.2
+            self.dgrt_max = 0.15
 
-            self.d_min = 0.01
+            self.d_min = 0.00
             self.d_max = 0.2
 
         elif kind is 'lowpol':

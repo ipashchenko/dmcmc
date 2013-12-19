@@ -4,7 +4,7 @@
 import sys
 sys.path.append('/home/ilya/work/emcee')
 import math
-#import emcee
+import emcee
 import numpy as np
 import numdifftools as nd
 from scipy import special
@@ -332,17 +332,17 @@ if __name__ == '__main__()':
     distributions = ((np.random.lognormal, list(),
                       {'mean': 0.0, 'sigma': 0.25}),
                      # zeropol
-                     #(genbeta, [0.0, 0.05, 1.0, 8.0],
-                     #dict(),),
+                     (genbeta, [0.0, 0.05, 1.0, 8.0],
+                     dict(),),
                      # lowpol
                       #(genbeta, [0.0, 0.05, 2.0, 3.0],
                       #dict(),),
                        # highpol
-                      (genbeta, [0.05, 0.1, 2.0, 3.0],
-                       dict(),),
+                      #(genbeta, [0.05, 0.1, 2.0, 3.0],
+                      # dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.01, 0.15, 3.0, 8.0], dict(),),
+                      (genbeta, [0.01, 0.10, 3.0, 8.0], dict(),),
                       (np.random.uniform, list(),
                         {'low': -math.pi, 'high': math.pi}),
                       (np.random.uniform, list(),
@@ -351,10 +351,10 @@ if __name__ == '__main__()':
     # Sampling posterior density of ``p``
 
     # Prepare sample of D_RA values from hypothetical distribution:
-    d_hypo = genbeta(0.08, 0.12, 5, 5, size=500)
+    d_hypo = genbeta(0.09, 0.11, 5, 5, size=500)
 
     # Initialize LnPost class - we need methods of it's objects
-    lnpost = LnPost(detections, ulimits, distributions, size=10000,
+    lnpost = LnPost(detections, ulimits, distributions, size=100,
                     lnpr=vec_lngenbeta, args=[5, 5, 0.08, 0.12])
 
     # 500 samples with 10000 data points each
@@ -362,3 +362,22 @@ if __name__ == '__main__()':
     # Create 500 data samples with 100 data points in each
     simulated_datas = [np.random.choice(ratio, size=100) for ratio in
                        predictive_ratios]
+
+    # Or use kde
+    from scipy.stats.kde import gaussian_kde
+    kde = gaussian_kde(detections)
+    newdets = kde.resample(size=1000)[0]
+
+    # Now analize each data sample to find D_RA
+    lnpost = LnPost(newdets, ulimits, distributions, size=10000,
+                    lnpr=vec_lnunif, args=[0.0, 0.2])
+
+    # Using affine-invariant MCMC
+    nwalkers = 250
+    ndim = 1
+    p0 = np.random.uniform(low=0.0, high=0.2, size=(nwalkers, ndim))
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
+    pos, prob, state = sampler.run_mcmc(p0, 250)
+    sampler.reset()
+
+    sampler.run_mcmc(pos, 500)

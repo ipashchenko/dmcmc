@@ -5,6 +5,7 @@ import numpy as np
 from scipy.special import gammaln
 from scipy import optimize
 
+
 class KnuthHist(object):
 
     def __init__(self, data):
