@@ -9,9 +9,9 @@ import numpy as np
 import numdifftools as nd
 from scipy import special
 from scipy import optimize
+from scipy.stats.kde import gaussian_kde
 #from knuth_hist import histogram
 #from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
-from scipy.stats.kde import gaussian_kde
 
 
 class LnPost(object):
@@ -271,14 +271,19 @@ def genbeta(a, b, *args, **kwargs):
     return (b - a) * np.random.beta(*args, **kwargs) + a
 
 
-def fn_distributions(mmin, mmax, dmin, dmax):
+def fn_distributions(mmin=None, mmax=None, ma=None, mb=None, dmin=None,
+                     dmax=None, da=3, db=8, rmean=0, rsigma=0.25, size=10000):
 
-    return ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
-            (genbeta, [mmin, mmax, 2.0, 3.0], dict(),),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
-            (genbeta, [dmin, dmax, 3.0, 8.0], dict(),),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
+    return ((np.random.lognormal, list(), {'mean': rmean, 'sigma': rsigma,
+                'size': size},),
+            (genbeta, [mmin, mmax, ma, mb], {'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},),
+            (genbeta, [dmin, dmax, da, db], {'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},))
 
 
 def laplace_logevidence(lnpost):
@@ -326,54 +331,16 @@ if __name__ == '__main__()':
 
     # Create data set from hypothetical parameters
     # Preparing distributions
-    distributions = ((np.random.lognormal, list(),
-                      {'mean': 0.0, 'sigma': 0.25}),
-                     # zeropol
-                     (genbeta, [0.0, 0.1, 1.0, 8.0],
-                     dict(),),
-                     # lowpol
-                      #(genbeta, [0.0, 0.05, 2.0, 3.0],
-                      #dict(),),
-                       # highpol
-                      #(genbeta, [0.05, 0.1, 2.0, 3.0],
-                      # dict(),),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.01, 0.15, 3.0, 8.0], dict(),),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}))
-
-    # Preparing distributions
-    distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
-                          (vec_lngenbeta,[1.0, 8.0, 0.0, 0.1]),
-                          (vec_lnunif,[-math.pi,math.pi]),
-                          (vec_lngenbeta, [3.0, 8.0, 0.01, 0.15]),
-                          (vec_lnunif, [-math.pi,math.pi]),
-                          (vec_lnunif, [-math.pi,math.pi]))
-    distributions = list()
-    # Setting up emcee
-    nwalkers = 200
-    ndim = 1
-    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
-    for (func, args) in distributions_data:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
-                                        bcast=True)
-        pos, prob, state = sampler.run_mcmc(p0, 500)
-        sampler.reset()
-        sampler.run_mcmc(pos, 1000)
-        # Using only 10000 points for specifying distributions
-        distributions.append(sampler.flatchain[:,0][::20].copy())
-
-    # Sampling posterior density of ``p``
+    distributions = [_distribution_wrapper(d[0], d[1], d[2]) for d in
+                     fn_distributions(mmin=0, mmax=0.1, ma=1, mb=8, dmin=0.01,
+                                      dmax=0.15, size=10000, da=3, db=8)]
 
     # Prepare sample of D_RA values from hypothetical distribution:
     d_hypo = genbeta(0.09, 0.11, 5, 5, size=500)
 
     # Initialize LnPost class - we need methods of it's objects
-    lnpost = LnPost(detections, ulimits, distributions, size=100,
-                    lnpr=vec_lngenbeta, args=[5, 5, 0.08, 0.12])
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=vec_lngenbeta,
+                    args=[5, 5, 0.08, 0.12])
 
     # 500 samples with 10000 data points each
     predictive_ratios = lnpost._lnlike.model_vectorized(d_hypo)
@@ -382,13 +349,12 @@ if __name__ == '__main__()':
                        predictive_ratios]
 
     # Or use kde
-    from scipy.stats.kde import gaussian_kde
     kde = gaussian_kde(detections)
     newdets = kde.resample(size=200)[0]
 
     # Now analize each data sample to find D_RA
-    lnpost = LnPost(newdets, ulimits, distributions, size=10000,
-                    lnpr=vec_lnunif, args=[0.0, 1.0])
+    lnpost = LnPost(newdets, ulimits, distributions, lnpr=vec_lnunif,
+                    args=[0.0, 1.0])
 
     # Using affine-invariant MCMC
     nwalkers = 250
