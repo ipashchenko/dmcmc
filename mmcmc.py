@@ -88,9 +88,6 @@ class LnLike(object):
 
         lnlk = lnlk_detections + lnlk_ulimits
 
-        print "LnLikelihood is: " + str(lnlk)
-        print "p is " + str(p)
-
         return lnlk
 
     def model(self, p):
@@ -173,10 +170,6 @@ class LnLike(object):
 
         result = np.log(probs).sum()
 
-        print "LnLike.lnprob returned " + str(result)
-        if result is np.NaN:
-            print xs, distribution
-            print len(xs), len(distribution)
         return result
 
 
@@ -405,6 +398,11 @@ if __name__ == '__main__()':
     # Or use kde
     kde = gaussian_kde(detections)
     newdets = kde.resample(size=200)[0]
+
+    # Using MLE
+
+
+
 
     # Now analize each data sample to find D_RA
     lnpost = LnPost(newdets, ulimits, distributions, lnpr=vec_lnunif,
