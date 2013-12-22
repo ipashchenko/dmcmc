@@ -9,11 +9,19 @@ import numpy as np
 import numdifftools as nd
 from scipy import special
 from scipy import optimize
+from scipy import integrate
 from scipy.stats.kde import gaussian_kde
 #from knuth_hist import histogram
 #from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
 
 
+# TODO: add power analysis to paper. Use resampling of known detections to find
+# sample size that is enough for 95%HDI be less then 0.03. Try firstly find
+# posterior of D_RA, then create many data seta from this posterior with reliable
+# volume each end finally find the proportion of cases where ROPE (defined by
+# D_RA posterior that generated all data sets) in 95% HDI.
+# TODO: Likelihood is pretty gaussian => can use Laplace appr. to evidence. How
+# often during power analysis
 class LnPost(object):
     """
     Class that represents posterior density of parameters.
@@ -312,13 +320,59 @@ def laplace_logevidence(lnpost):
            0.5 * np.log(abs(hess_map[0]))
 
 
-def find_m(mmax, mmin=0, dmin=0, dmax=0.1, detections=None, ulimits=None):
+def find_laplace_logZ(mmax, mmin=0, dmin=0, dmax=0.1, detections=None,
+                      ulimits=None):
 
     lnpost = LnPost(detections, ulimits,
                     fn_distributions(mmin, mmax, dmin, dmax),
                     size=10000, lnpr=lnunif, args=[0., 1.])
 
     return laplace_logevidence(lnpost)
+
+
+def hdi_of_mcmc(sample_vec, cred_mass=0.95):
+    """
+    Highest density interval of sample.
+    """
+
+    assert len(sample_vec), 'need points to find HDI'
+    sorted_pts = np.sort(sample_vec)
+
+    ci_idx_inc = int(np.floor(cred_mass * len(sorted_pts)))
+    n_cis = len(sorted_pts) - ci_idx_inc
+    ci_width = sorted_pts[ci_idx_inc:] - sorted_pts[:n_cis]
+
+    min_idx = np.argmin(ci_width)
+    hdi_min = sorted_pts[min_idx]
+    hdi_max = sorted_pts[min_idx + ci_idx_inc]
+
+    return hdi_min, hdi_max
+
+
+def hdi_of_plot(y, x, cred_mass=0.95):
+    """
+    Highest density interval for (x, y).
+    """
+
+    pass
+
+
+def find_grid_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
+                   dmin=None, dmax=None, da=3, db=8, rmean=0, rsigma=0.25,
+                   size=10000, lnpr=lnunif, args=[0., 1.], epsrel=0.001):
+
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=size, da=da,
+                                      db=db)]
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnpr, args=args)
+
+    def fn(x):
+        return math.exp(lnpost(x))
+
+    result = integrate.quad(fn, 0, 1, full_output=0, epsrel=epsrel)
+
+    return math.log(result[0])
 
 
 if __name__ == '__main__()':
@@ -331,7 +385,7 @@ if __name__ == '__main__()':
 
     # Create data set from hypothetical parameters
     # Preparing distributions
-    distributions = [_distribution_wrapper(d[0], d[1], d[2]) for d in
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
                      fn_distributions(mmin=0, mmax=0.1, ma=1, mb=8, dmin=0.01,
                                       dmax=0.15, size=10000, da=3, db=8)]
 
