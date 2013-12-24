@@ -4,7 +4,7 @@
 import sys
 sys.path.append('/home/ilya/work/emcee')
 import math
-import emcee
+#import emcee
 import numpy as np
 import numdifftools as nd
 from scipy import special
@@ -313,12 +313,15 @@ def laplace_logevidence(lnpost):
            0.5 * np.log(abs(hess_map[0]))
 
 
-def find_laplace_logZ(mmax, mmin=0, dmin=0, dmax=0.1, detections=None,
-                      ulimits=None):
+def find_laplace_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
+                   dmin=None, dmax=None, da=3, db=8, rmean=0, rsigma=0.25,
+                   size=10000, lnpr=lnunif, args=[0., 1.], epsrel=0.001):
 
-    lnpost = LnPost(detections, ulimits,
-                    fn_distributions(mmin, mmax, dmin, dmax),
-                    size=10000, lnpr=lnunif, args=[0., 1.])
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=size, da=da,
+                                      db=db)]
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnpr, args=args)
 
     return laplace_logevidence(lnpost)
 
@@ -342,12 +345,85 @@ def hdi_of_mcmc(sample_vec, cred_mass=0.95):
     return hdi_min, hdi_max
 
 
-def hdi_of_plot(y, x, cred_mass=0.95):
+def hdi_of_plot(y, x, fn, cred_mass=0.95):
     """
-    Highest density interval for (x, y).
+    Highest density interval for (x, y). Currently works only for one-mode
+    densities.
     """
 
-    pass
+    lvl = 0.50
+
+    def get_cred(x, y, fn, lvl):
+
+        y = np.array(y)
+        # Find max of y's
+        ymax = max(y)
+        # Select some level
+        y0 = lvl * ymax
+        x1 = x[np.where(y - y0 > 0)][0]
+        x2 = x[np.where(y - y0 > 0)][-1]
+        Z = integrate.quad(fn, 0, 1, full_output=0, epsrel=0.001)[0]
+        cred = integrate.quad(fn, x1, x2)[0] / Z
+
+        return cred, x1, x2
+
+    def d_cred(lvl, x, y, fn, cred_mass):
+
+        cred = get_cred(x, y, fn, lvl)[0]
+        return cred_mass - cred
+
+    lvl_star = optimize.brentq(d_cred, 0.01, 0.99, args=(x, y, fn, cred_mass))
+
+    cred, x1, x2 = get_cred(x, y, fn, lvl_star)
+    print "Got x1 = " + str(x1) + ' & x2 = ' + str(x2) + ' with cred: ' +\
+           str(cred)
+
+    while(cred < cred_mass):
+
+        if cred_mass - cred > 0.1:
+            lvl -= 0.1
+            print "Going down on 0.1 in lvl"
+        elif 0.05 < cred_mass - cred < 0.1:
+            lvl -= 0.05
+            print "Going down on 0.05 in lvl"
+        if cred_mass - cred < 0.05:
+            lvl -= 0.01
+            print "Going down on 0.01 in lvl"
+
+        print "lvl = " + str(lvl)
+        cred, x1, x2 = get_cred(x, y, fn, lvl)
+        print "Got x1 = " + str(x1) + ' & x2 = ' + str(x2) + ' with cred: ' +\
+            str(cred)
+
+    return cred, x1, x2
+
+
+def find_cred_interval_1d(post, cred_mass=0.95, a=0, b=1,
+                          xmax_interval=[0.01, 0.25]):
+    """
+    Find 95% credibility interval for unimodal posterior prob. density ``post``.
+    """
+    # MAP
+    xmap = optimize.minimize_scalar(lambda x: -post(x), bounds=xmax_interval,
+                                     method='Bounded')['x']
+    pmap = post(xmap)
+
+    def get_cred(lvl, post, xmap, a=a, b=b):
+        pmap = post(xmap)
+        p0 = pmap * lvl
+        x1 = optimize.brentq(lambda x: post(x) - p0, a, xmap)
+        x2 = optimize.brentq(lambda x: post(x) - p0, xmap, b)
+        Z = integrate.quad(post, a, b, full_output=0, epsrel=0.001)[0]
+        cred = integrate.quad(post, x1, x2)[0] / Z
+        return cred, x1, x2
+
+    def d_cred(lvl, post, pmap, a=a, b=b, cred_mass=cred_mass):
+        cred = get_cred(lvl, post, pmap, a=a, b=b)[0]
+        return cred_mass - cred
+
+    lvl_star = optimize.brentq(d_cred, a, b, args=(post, pmap, a, b, cred_mass))
+
+    return lvl_star
 
 
 def find_grid_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
@@ -399,21 +475,10 @@ if __name__ == '__main__()':
     kde = gaussian_kde(detections)
     newdets = kde.resample(size=200)[0]
 
-    # Using MLE
+    # Find MAP
+    lnpost = LnPost(newdets, ulimits, distributions, lnpr=lnunif,
+                    args=[0., 1.])
+    x_map = optimize.minimize_scalar(lambda x: -lnpost(x), bounds=[0.01, 0.25],
+                                     method='Bounded')['x']
 
-
-
-
-    # Now analize each data sample to find D_RA
-    lnpost = LnPost(newdets, ulimits, distributions, lnpr=vec_lnunif,
-                    args=[0.0, 1.0])
-
-    # Using affine-invariant MCMC
-    nwalkers = 250
-    ndim = 1
-    p0 = np.random.uniform(low=0.0, high=0.2, size=(nwalkers, ndim))
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
-    pos, prob, state = sampler.run_mcmc(p0, 250)
-    sampler.reset()
-
-    sampler.run_mcmc(pos, 500)
+    probs = [math.exp(lnpost(p)) for p in np.arange(250) / 1000.]
