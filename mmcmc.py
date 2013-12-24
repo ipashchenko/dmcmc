@@ -4,16 +4,24 @@
 import sys
 sys.path.append('/home/ilya/work/emcee')
 import math
-import emcee
+#import emcee
 import numpy as np
 #import numdifftools as nd
 from scipy import special
 from scipy import optimize
+from scipy import integrate
+from scipy.stats.kde import gaussian_kde
 #from knuth_hist import histogram
 #from matplotlib.pyplot import bar, text, xlabel, ylabel, axvline, rc
-from scipy.stats.kde import gaussian_kde
 
 
+# TODO: add power analysis to paper. Use resampling of known detections to find
+# sample size that is enough for 95%HDI be less then 0.03. Try firstly find
+# posterior of D_RA, then create many data seta from this posterior with reliable
+# volume each end finally find the proportion of cases where ROPE (defined by
+# D_RA posterior that generated all data sets) in 95% HDI.
+# TODO: Likelihood is pretty gaussian => can use Laplace appr. to evidence. How
+# often during power analysis
 class LnPost(object):
     """
     Class that represents posterior density of parameters.
@@ -79,9 +87,6 @@ class LnLike(object):
         lnlk_ulimits = self.lnprob(self.ulimits, ratio_distribution, kind='u')
 
         lnlk = lnlk_detections + lnlk_ulimits
-
-        print "LnLikelihood is: " + str(lnlk)
-        print "p is " + str(p)
 
         return lnlk
 
@@ -165,10 +170,6 @@ class LnLike(object):
 
         result = np.log(probs).sum()
 
-        print "LnLike.lnprob returned " + str(result)
-        if result is np.NaN:
-            print xs, distribution
-            print len(xs), len(distribution)
         return result
 
 
@@ -271,14 +272,19 @@ def genbeta(a, b, *args, **kwargs):
     return (b - a) * np.random.beta(*args, **kwargs) + a
 
 
-def fn_distributions(mmin, mmax, dmin, dmax):
+def fn_distributions(mmin=None, mmax=None, ma=None, mb=None, dmin=None,
+                     dmax=None, da=3, db=8, rmean=0, rsigma=0.25, size=10000):
 
-    return ((np.random.lognormal, list(), {'mean': 0.0, 'sigma': 0.25}),
-            (genbeta, [mmin, mmax, 2.0, 3.0], dict(),),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
-            (genbeta, [dmin, dmax, 3.0, 8.0], dict(),),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}),
-            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi}))
+    return ((np.random.lognormal, list(), {'mean': rmean, 'sigma': rsigma,
+                'size': size},),
+            (genbeta, [mmin, mmax, ma, mb], {'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},),
+            (genbeta, [dmin, dmax, da, db], {'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},),
+            (np.random.uniform, list(), {'low': -math.pi, 'high': math.pi,
+                'size': size},))
 
 
 def laplace_logevidence(lnpost):
@@ -307,13 +313,135 @@ def laplace_logevidence(lnpost):
            0.5 * np.log(abs(hess_map[0]))
 
 
-def find_m(mmax, mmin=0, dmin=0, dmax=0.1, detections=None, ulimits=None):
+def find_laplace_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
+                   dmin=None, dmax=None, da=3, db=8, rmean=0, rsigma=0.25,
+                   size=10000, lnpr=lnunif, args=[0., 1.], epsrel=0.001):
 
-    lnpost = LnPost(detections, ulimits,
-                    fn_distributions(mmin, mmax, dmin, dmax),
-                    size=10000, lnpr=lnunif, args=[0., 1.])
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=size, da=da,
+                                      db=db)]
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnpr, args=args)
 
     return laplace_logevidence(lnpost)
+
+
+def hdi_of_mcmc(sample_vec, cred_mass=0.95):
+    """
+    Highest density interval of sample.
+    """
+
+    assert len(sample_vec), 'need points to find HDI'
+    sorted_pts = np.sort(sample_vec)
+
+    ci_idx_inc = int(np.floor(cred_mass * len(sorted_pts)))
+    n_cis = len(sorted_pts) - ci_idx_inc
+    ci_width = sorted_pts[ci_idx_inc:] - sorted_pts[:n_cis]
+
+    min_idx = np.argmin(ci_width)
+    hdi_min = sorted_pts[min_idx]
+    hdi_max = sorted_pts[min_idx + ci_idx_inc]
+
+    return hdi_min, hdi_max
+
+
+def hdi_of_plot(y, x, fn, cred_mass=0.95):
+    """
+    Highest density interval for (x, y). Currently works only for one-mode
+    densities.
+    """
+
+    lvl = 0.50
+
+    def get_cred(x, y, fn, lvl):
+
+        y = np.array(y)
+        # Find max of y's
+        ymax = max(y)
+        # Select some level
+        y0 = lvl * ymax
+        x1 = x[np.where(y - y0 > 0)][0]
+        x2 = x[np.where(y - y0 > 0)][-1]
+        Z = integrate.quad(fn, 0, 1, full_output=0, epsrel=0.001)[0]
+        cred = integrate.quad(fn, x1, x2)[0] / Z
+
+        return cred, x1, x2
+
+    def d_cred(lvl, x, y, fn, cred_mass):
+
+        cred = get_cred(x, y, fn, lvl)[0]
+        return cred_mass - cred
+
+    lvl_star = optimize.brentq(d_cred, 0.01, 0.99, args=(x, y, fn, cred_mass))
+
+    cred, x1, x2 = get_cred(x, y, fn, lvl_star)
+    print "Got x1 = " + str(x1) + ' & x2 = ' + str(x2) + ' with cred: ' +\
+           str(cred)
+
+    while(cred < cred_mass):
+
+        if cred_mass - cred > 0.1:
+            lvl -= 0.1
+            print "Going down on 0.1 in lvl"
+        elif 0.05 < cred_mass - cred < 0.1:
+            lvl -= 0.05
+            print "Going down on 0.05 in lvl"
+        if cred_mass - cred < 0.05:
+            lvl -= 0.01
+            print "Going down on 0.01 in lvl"
+
+        print "lvl = " + str(lvl)
+        cred, x1, x2 = get_cred(x, y, fn, lvl)
+        print "Got x1 = " + str(x1) + ' & x2 = ' + str(x2) + ' with cred: ' +\
+            str(cred)
+
+    return cred, x1, x2
+
+
+def find_cred_interval_1d(post, cred_mass=0.95, a=0, b=1,
+                          xmax_interval=[0.01, 0.25]):
+    """
+    Find 95% credibility interval for unimodal posterior prob. density ``post``.
+    """
+    # MAP
+    xmap = optimize.minimize_scalar(lambda x: -post(x), bounds=xmax_interval,
+                                     method='Bounded')['x']
+    pmap = post(xmap)
+
+    def get_cred(lvl, post, xmap, a=a, b=b):
+        pmap = post(xmap)
+        p0 = pmap * lvl
+        x1 = optimize.brentq(lambda x: post(x) - p0, a, xmap)
+        x2 = optimize.brentq(lambda x: post(x) - p0, xmap, b)
+        Z = integrate.quad(post, a, b, full_output=0, epsrel=0.001)[0]
+        cred = integrate.quad(post, x1, x2)[0] / Z
+        return cred, x1, x2
+
+    def d_cred(lvl, post, pmap, a=a, b=b, cred_mass=cred_mass):
+        cred = get_cred(lvl, post, pmap, a=a, b=b)[0]
+        return cred_mass - cred
+
+    lvl_star = optimize.brentq(d_cred, a, b, args=(post, pmap, a, b, cred_mass))
+
+    return lvl_star
+
+
+def find_grid_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
+                   dmin=None, dmax=None, da=3, db=8, rmean=0, rsigma=0.25,
+                   size=10000, lnpr=lnunif, args=[0., 1.], epsrel=0.001):
+
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=size, da=da,
+                                      db=db)]
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnpr, args=args)
+
+    def fn(x):
+        return math.exp(lnpost(x))
+
+    result = integrate.quad(fn, 0, 1, full_output=0, epsrel=epsrel)
+
+    return math.log(result[0])
 
 
 if __name__ == '__main__()':
@@ -326,54 +454,16 @@ if __name__ == '__main__()':
 
     # Create data set from hypothetical parameters
     # Preparing distributions
-    distributions = ((np.random.lognormal, list(),
-                      {'mean': 0.0, 'sigma': 0.25}),
-                     # zeropol
-                     (genbeta, [0.0, 0.1, 1.0, 8.0],
-                     dict(),),
-                     # lowpol
-                      #(genbeta, [0.0, 0.05, 2.0, 3.0],
-                      #dict(),),
-                       # highpol
-                      #(genbeta, [0.05, 0.1, 2.0, 3.0],
-                      # dict(),),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}),
-                      (genbeta, [0.01, 0.15, 3.0, 8.0], dict(),),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}),
-                      (np.random.uniform, list(),
-                        {'low': -math.pi, 'high': math.pi}))
-
-    # Preparing distributions
-    distributions_data = ((vec_lnlognorm, [0.0, 0.25]),
-                          (vec_lngenbeta,[1.0, 8.0, 0.0, 0.1]),
-                          (vec_lnunif,[-math.pi,math.pi]),
-                          (vec_lngenbeta, [3.0, 8.0, 0.01, 0.15]),
-                          (vec_lnunif, [-math.pi,math.pi]),
-                          (vec_lnunif, [-math.pi,math.pi]))
-    distributions = list()
-    # Setting up emcee
-    nwalkers = 200
-    ndim = 1
-    p0 = [np.random.rand(ndim)/10. for i in xrange(nwalkers)]
-    for (func, args) in distributions_data:
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, func, args=args,
-                                        bcast=True)
-        pos, prob, state = sampler.run_mcmc(p0, 500)
-        sampler.reset()
-        sampler.run_mcmc(pos, 1000)
-        # Using only 10000 points for specifying distributions
-        distributions.append(sampler.flatchain[:,0][::20].copy())
-
-    # Sampling posterior density of ``p``
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=0, mmax=0.1, ma=1, mb=8, dmin=0.01,
+                                      dmax=0.15, size=10000, da=3, db=8)]
 
     # Prepare sample of D_RA values from hypothetical distribution:
     d_hypo = genbeta(0.09, 0.11, 5, 5, size=500)
 
     # Initialize LnPost class - we need methods of it's objects
-    lnpost = LnPost(detections, ulimits, distributions, size=100,
-                    lnpr=vec_lngenbeta, args=[5, 5, 0.08, 0.12])
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=vec_lngenbeta,
+                    args=[5, 5, 0.08, 0.12])
 
     # 500 samples with 10000 data points each
     predictive_ratios = lnpost._lnlike.model_vectorized(d_hypo)
@@ -382,20 +472,13 @@ if __name__ == '__main__()':
                        predictive_ratios]
 
     # Or use kde
-    from scipy.stats.kde import gaussian_kde
     kde = gaussian_kde(detections)
     newdets = kde.resample(size=200)[0]
 
-    # Now analize each data sample to find D_RA
-    lnpost = LnPost(newdets, ulimits, distributions, size=10000,
-                    lnpr=vec_lnunif, args=[0.0, 1.0])
+    # Find MAP
+    lnpost = LnPost(newdets, ulimits, distributions, lnpr=lnunif,
+                    args=[0., 1.])
+    x_map = optimize.minimize_scalar(lambda x: -lnpost(x), bounds=[0.01, 0.25],
+                                     method='Bounded')['x']
 
-    # Using affine-invariant MCMC
-    nwalkers = 250
-    ndim = 1
-    p0 = np.random.uniform(low=0.0, high=0.2, size=(nwalkers, ndim))
-    sampler = emcee.EnsembleSampler(nwalkers, ndim, lnpost)
-    pos, prob, state = sampler.run_mcmc(p0, 250)
-    sampler.reset()
-
-    sampler.run_mcmc(pos, 500)
+    probs = [math.exp(lnpost(p)) for p in np.arange(250) / 1000.]
