@@ -419,10 +419,11 @@ def find_cred_interval_1d(post, cred_mass=0.95, a=0, b=1,
         return cred, x1, x2
 
     def d_cred(lvl, post, pmap, a=a, b=b, cred_mass=cred_mass):
-        cred = get_cred(lvl, post, pmap, a=a, b=b)[0]
+        cred = get_cred(lvl, post, xmap, a=a, b=b)[0]
         return cred_mass - cred
 
-    lvl_star = optimize.brentq(d_cred, a, b, args=(post, pmap, a, b, cred_mass))
+    lvl_star = optimize.brentq(d_cred, 0.01, 0.75, args=(post, pmap, a, b,
+                                                         cred_mass))
 
     return get_cred(lvl_star, post, xmap, a=a, b=b)[1:]
 
@@ -529,6 +530,35 @@ def model_analysis(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
     model.update({"perc": percentiles})
 
     return model
+
+
+def power_analysis(detections, ulimits, size=None, a=0., b=1., mmin=None,
+                   mmax=None, ma=None, mb=None, dmin=None, dmax=None, da=None,
+                   db=None):
+
+    # Create dataset with predefined size by resampling from original data pdf
+    print "Creating data sample with size = " + str(size)
+    kde = gaussian_kde(detections)
+    newdets = kde.resample(size=size)[0]
+    print newdets
+
+    # Preparing distributions for current model
+    print "Creating model distributions"
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=10000, da=da,
+                                      db=db)]
+
+    print "Initializing Posterior pdf"
+    lnpost = LnPost(newdets, ulimits, distributions, lnpr=lnunif, args=[a, b])
+
+    print "Finding ranges of 95% HDI of the posterior"
+    x1, x2 = find_cred_interval_1d(lambda x: math.exp(lnpost(x)), cred_mass=0.95,
+                                   a=0, b=1, xmax_interval=[0.01, 0.25])
+
+    print x1, x2
+
+    return x2 - x1
 
 
 if __name__ == '__main__()':
