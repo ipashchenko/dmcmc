@@ -35,7 +35,7 @@ class LnPost(object):
         return self._lnlike.__call__(d)
 
     def __call__(self, d):
-        return self.lnlike(d) + self.lnpr(d)
+        return self.lnlike(d) + self.lnpr(d), d
 
 
 class LnLike(object):
@@ -90,7 +90,7 @@ class LnLike(object):
         lnlk = lnlk_detections + lnlk_ulimits
 
         print "LnLikelihood is: " + str(lnlk)
-        print "p is " + str(p)
+        print "p is " + str(d)
 
         return lnlk
 
