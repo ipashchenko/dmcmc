@@ -8,6 +8,7 @@ import math
 import numpy as np
 #import numdifftools as nd
 from scipy import special
+from scipy import stats
 from scipy import optimize
 from scipy import integrate
 from scipy.stats.kde import gaussian_kde
@@ -418,12 +419,13 @@ def find_cred_interval_1d(post, cred_mass=0.95, a=0, b=1,
         return cred, x1, x2
 
     def d_cred(lvl, post, pmap, a=a, b=b, cred_mass=cred_mass):
-        cred = get_cred(lvl, post, pmap, a=a, b=b)[0]
+        cred = get_cred(lvl, post, xmap, a=a, b=b)[0]
         return cred_mass - cred
 
-    lvl_star = optimize.brentq(d_cred, a, b, args=(post, pmap, a, b, cred_mass))
+    lvl_star = optimize.brentq(d_cred, 0.01, 0.75, args=(post, pmap, a, b,
+                                                         cred_mass))
 
-    return lvl_star
+    return get_cred(lvl_star, post, xmap, a=a, b=b)[1:]
 
 
 def find_grid_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
@@ -442,6 +444,121 @@ def find_grid_logZ(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
     result = integrate.quad(fn, 0, 1, full_output=0, epsrel=epsrel)
 
     return math.log(result[0])
+
+
+def model_analysis(detections, ulimits, mmin=None, mmax=None, ma=None, mb=None,
+                   dmin=None, dmax=None, da=None, db=None, a=0., b=1.,
+                   xmap_interval=[0.01, 0.25]):
+
+    for kwarg in [mmin, mmax, ma, mb, dmin, dmax, da, db, a, b, xmap_interval]:
+        assert(kwarg is not None)
+
+    # dictionary of model parameters
+    model = dict()
+    model.update({"mmin": mmin, "mmax": mmax, "ma": ma, "mb": mb, "dmin": dmin,
+                  "dmax": dmax, "da": da, "db": db})
+
+    # Preparing distributions for current model
+    print "Creating model distributions"
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=10000, da=da,
+                                      db=db)]
+
+    # Initialize LnPosterior of current model
+    print "Initializing Posterior pdf"
+    lnpost = LnPost(detections, ulimits, distributions, lnpr=lnunif,
+                    args=[a, b])
+
+    # Find MAP D_RA and probability of it
+    print "Calculating MAPs"
+    xmap = optimize.minimize_scalar(lambda x: -math.exp(lnpost(x)),
+                                    bounds=xmap_interval,
+                                    method='Bounded')['x']
+    pmap = math.exp(lnpost((xmap)))
+
+    # Find normalizing constant (evidence)
+    print "Calculating evidence of model"
+    Z = integrate.quad(lambda x: math.exp(lnpost(x)), a, b, full_output=0, epsrel=0.001)[0]
+    # Add it to model dictionary
+    model.update({"lnZ": math.log(Z)})
+
+    # Create plausible range of bulk posterior for D_RA for fitting
+    ds_ra = np.arange(250) / 1000.
+    # Calculate near mode
+    print "Calculating probabilities for fitting with gaussian"
+    post_probs = [math.exp(lnpost(d)) / Z for d in ds_ra]
+
+    # Gaussian for fitting the posterior pdf
+    def gauss(x, *p):
+        amp, mu, sigma = p
+        return amp * np.exp(-(x - mu) ** 2 / (2. * sigma ** 2))
+
+    # Fit with gaussian
+    print "Fitting posterior pdf with gaussian"
+    p = optimize.curve_fit(gauss, ds_ra, post_probs, p0=[pmap, xmap, 0.1])
+    mu, sigma = p[0][1:]
+    sigma = abs(sigma)
+
+    # Sample from gaussian pdf of D_RA 1000 D_RA values
+    print "Generating values of D_RA from posterior"
+    ds_post = np.random.normal(loc=mu, scale=sigma, size=1000)
+
+    # Use model to get predicted ratios
+    # dim = (1000, len(distributions[i]=10000))
+    print "Creating replicated data sets"
+    distr_ratios_replicas = lnpost._lnlike.model_vectorized(ds_post)
+    detections_replicas = [np.random.choice(distr_ratio, size=len(detections))
+                           for distr_ratio in distr_ratios_replicas]
+
+    # Now check plausibility of model using statistics of original data &
+    # replicas:
+    print "Calculating statistics for replicated data sets"
+    simulated_means = map(np.mean, detections_replicas)
+    simulated_maxs = map(np.max, detections_replicas)
+    simulated_mins = map(np.min, detections_replicas)
+
+    # Check what quantils are corresponds to real data
+    print "Comparing replicas statistics with data"
+    percentiles = dict()
+    percentiles.update({"min": stats.percentileofscore(simulated_mins,
+                                                       np.min(detections))})
+    percentiles.update({"max": stats.percentileofscore(simulated_maxs,
+                                                       np.max(detections))})
+    percentiles.update({"mean": stats.percentileofscore(simulated_means,
+                                                        np.mean(detections))})
+    model.update({"perc": percentiles})
+
+    return model
+
+
+def power_analysis(detections, ulimits, size=None, a=0., b=1., mmin=None,
+                   mmax=None, ma=None, mb=None, dmin=None, dmax=None, da=None,
+                   db=None):
+
+    # Create dataset with predefined size by resampling from original data pdf
+    print "Creating data sample with size = " + str(size)
+    kde = gaussian_kde(detections)
+    newdets = kde.resample(size=size)[0]
+    print newdets
+
+    # Preparing distributions for current model
+    print "Creating model distributions"
+    distributions = [_distribution_wrapper(d[0], d[1], d[2])() for d in
+                     fn_distributions(mmin=mmin, mmax=mmax, ma=ma, mb=mb,
+                                      dmin=dmin, dmax=dmax, size=10000, da=da,
+                                      db=db)]
+
+    print "Initializing Posterior pdf"
+    lnpost = LnPost(newdets, ulimits, distributions, lnpr=lnunif, args=[a, b])
+
+    print "Finding ranges of 95% HDI of the posterior"
+    x1, x2 = find_cred_interval_1d(lambda x: math.exp(lnpost(x)), cred_mass=0.95,
+                                   a=0, b=1, xmax_interval=[0.01, 0.25])
+
+    print x1, x2
+
+    return x2 - x1
 
 
 if __name__ == '__main__()':
